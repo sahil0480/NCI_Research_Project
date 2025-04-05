@@ -1,0 +1,22 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:latest', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:latest']
+
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      [
+        'apply',
+        '-f',
+        'k8s/deployment.yaml',
+        '-f',
+        'k8s/service.yaml'
+      ]
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=europe-west1'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=nci-research-cluster'
+
+images:
+  - 'europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:latest'

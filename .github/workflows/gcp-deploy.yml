@@ -1,0 +1,36 @@
+name: GCP Django Deploy
+
+on:
+  push:
+    branches:
+      - master  # or 'main' depending on your branch name
+
+jobs:
+  build-deploy:
+    name: Build & Deploy Django on GCP
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          version: '>= 430.0.0'
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: nci-research-project
+
+      - name: Authorize Docker to push to Artifact Registry
+        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
+
+      - name: Build & Push Docker Image
+        run: |
+          docker build -t europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:latest .
+          docker push europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:latest
+
+      - name: Get Cluster Credentials
+        run: gcloud container clusters get-credentials nci-research-cluster --region europe-west1
+
+      - name: Deploy to GKE
+        run: kubectl apply -f k8s/
