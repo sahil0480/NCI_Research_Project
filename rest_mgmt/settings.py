@@ -26,13 +26,13 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'whitenoise.runserver_nostatic',  # ← Add this if using WhiteNoise
+    'whitenoise.runserver_nostatic',  # WhiteNoise dev server support
 ]
 
 # MIDDLEWARE
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # ← Add WhiteNoise here
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Enables static files from WhiteNoise
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -92,8 +92,9 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'my_rest', 'static')]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-# WhiteNoise static files compression
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+# WhiteNoise for static file serving
+STATICFILES_STORAGE = "whitenoise.storage.ManifestStaticFilesStorage"
+WHITENOISE_SKIP_MISSING_FILES = True  # Skip missing static files like .map
 
 # MEDIA FILES
 MEDIA_URL = '/media/'
