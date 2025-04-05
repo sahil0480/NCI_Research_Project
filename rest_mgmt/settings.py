@@ -93,7 +93,7 @@ STATICFILES_DIRS = [os.path.join(BASE_DIR, 'my_rest', 'static')]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # WhiteNoise for static file serving
-STATICFILES_STORAGE = "whitenoise.storage.ManifestStaticFilesStorage"
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 WHITENOISE_SKIP_MISSING_FILES = True  # Skip missing static files like .map
 
 # MEDIA FILES
