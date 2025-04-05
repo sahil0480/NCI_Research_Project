@@ -1,0 +1,43 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <link rel="stylesheet" href="{% static 'my_rest/css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/style.css' %}">
+
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card mt-5">
+                    <div class="card-header">
+                        <h2 class="text-center">Login</h2>
+                    </div>
+                    <div class="card-body">
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="form-group">
+                                <label for="id_username">Username:</label>
+                                {{ form.username }}
+                            </div>
+                            <div class="form-group">
+                                <label for="id_password">Password:</label>
+                                {{ form.password }}
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">Login</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="{% static 'my_rest/js/jquery-3.2.1.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/popper.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/bootstrap.min.js' %}"></script>
+</body>
+</html>

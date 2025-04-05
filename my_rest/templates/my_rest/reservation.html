@@ -1,0 +1,113 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reservation - Sahil's Kitchen</title>
+    <link rel="stylesheet" href="{% static 'my_rest/css/bootstrap.min.css'%}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/style.css'%}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/custom.css'%}">
+</head>
+<body>
+    <header class="top-navbar">
+        <nav class="navbar navbar-expand-lg navbar-light bg-light">
+            <div class="container">
+                <a class="navbar-brand" href="{% url 'index' %}">
+                    <h3>Sahil's Kitchen</h3>
+                </a>
+                <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbars-rs-food" aria-controls="navbars-rs-food" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbars-rs-food">
+                    <ul class="navbar-nav ml-auto">
+                        <li class="nav-item"><a class="nav-link" href="{% url 'index' %}">Home</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'menu' %}">Menu</a></li>
+                        <li class="nav-item active"><a class="nav-link" href="{% url 'reservation' %}">Reservation</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'view_cart' %}">View Cart</a></li> <!-- Added View Cart link -->
+                        {% if user.is_authenticated %}
+                            <li class="nav-item">
+                                <span class="nav-link">{{ user.username }}</span>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="{% url 'logout' %}">Logout</a>
+                            </li>
+                        {% else %}
+                            <li class="nav-item"><a class="nav-link" href="{% url 'login' %}">Login</a></li>
+                            <li class="nav-item"><a class="nav-link" href="{% url 'signup' %}">Signup</a></li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <!-- Reservation Form -->
+    <section class="reservation-box">
+        <div class="container">
+            <div class="row">
+                <div class="col-lg-12">
+                    <div class="heading-title text-center">
+                        <h2>Make a Reservation</h2>
+                        <p>Please fill in the form below to reserve your table.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-12 col-sm-12 col-xs-12">
+                    <div class="contact-block">
+                        <form id="reservation-form" action="#" method="post">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <input type="text" class="form-control" placeholder="Your Name" name="name" required data-error="Please enter your name">
+                                        <div class="help-block with-errors"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <input type="email" class="form-control" placeholder="Your Email" name="email" required data-error="Please enter your email">
+                                        <div class="help-block with-errors"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <input type="text" class="form-control" id="phone" placeholder="Phone Number" name="phone" required data-error="Please enter your phone number">
+                                        <div class="help-block with-errors"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <input type="text" class="form-control" id="datepicker" placeholder="Date" name="date" required data-error="Please select a date">
+                                        <div class="help-block with-errors"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <textarea class="form-control" placeholder="Message" rows="5" name="message" required data-error="Please enter your message"></textarea>
+                                        <div class="help-block with-errors"></div>
+                                    </div>
+                                    <div class="submit-button text-center">
+                                        <button class="btn btn-common" id="submit" type="submit">Submit Reservation</button>
+                                        <div id="msgSubmit" class="h3 text-center hidden"></div>
+                                        <div class="clearfix"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- End Reservation Form -->
+
+    <!-- JavaScript files -->
+    <script src="{% static 'my_rest/js/jquery-3.2.1.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/popper.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/bootstrap.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/custom.js'%}"></script>
+</body>
+</html>

@@ -1,0 +1,213 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sahil's Kitchen - Menu</title>
+    <link rel="apple-touch-icon" href="{% static 'my_rest/images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/style.css' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/responsive.css' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/custom.css' %}">
+</head>
+<body>
+<header class="top-navbar">
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container">
+            <a class="navbar-brand" href="{% url 'index' %}">
+                <h3>Sahil's Kitchen</h3>
+            </a>
+            <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbars-rs-food" aria-controls="navbars-rs-food" aria-expanded="false" aria-label="Toggle navigation">
+              <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbars-rs-food">
+                <ul class="navbar-nav ml-auto">
+                    <li class="nav-item active"><a class="nav-link" href="{% url 'index' %}">Home</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'menu' %}">Menu</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'reservation' %}">Reservation</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'view_cart' %}">View Cart</a></li> <!-- Added View Cart link -->
+                    {% if user.is_authenticated %}
+                        <li class="nav-item">
+                            <span class="nav-link">{{ user.username }}</span>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{% url 'logout' %}">Logout</a>
+                        </li>
+                    {% else %}
+                        <li class="nav-item"><a class="nav-link" href="{% url 'login' %}">Login</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'signup' %}">Signup</a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+</header>
+
+    <!-- Start Menu -->
+<div class="menu-box">
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-12">
+                <div class="heading-title text-center">
+                    <h2>Our Menu</h2>
+                    <p>Check out our delicious menu!</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Menu Items fetched from Django database -->
+        <div class="row">
+            {% for item in menu_items %}
+            <div class="col-lg-4 col-md-6 special-grid dinner">
+                <div class="gallery-single fix">
+                    <img src="{{ item.image.url }}" class="img-fluid" alt="{{ item.name }}">
+                    <div class="why-text">
+                        <h3>{{ item.category }}</h3>
+                        <h4>{{ item.name }}</h4>
+                        <p>{{ item.description }}</p>
+                        <h5>{{ item.price }}</h5>
+                        <!-- Form to add item to cart -->
+                        <form onsubmit="addToCart({{ item.id }})" method="post">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-primary">Add To Cart</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+<!-- End Menu -->
+    
+    <!-- Start Contact info -->
+    <div class="contact-imfo-box">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-4 arrow-right">
+                    <i class="fa fa-volume-control-phone"></i>
+                    <div class="overflow-hidden">
+                        <h4>Phone</h4>
+                        <p class="lead">+353899877079</p>
+                    </div>
+                </div>
+                <div class="col-md-4 arrow-right">
+                    <i class="fa fa-envelope"></i>
+                    <div class="overflow-hidden">
+                        <h4>Email</h4>
+                        <p class="lead">x23220228@student.ncirl.ie</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <i class="fa fa-map-marker"></i>
+                    <div class="overflow-hidden">
+                        <h4>Location</h4>
+                        <p class="lead">Dublin 4, Ireland</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- End Contact info -->
+
+    <!-- Start Footer -->
+    <footer class="footer-area bg-f">
+        <div class="container">
+            <div class="row">
+                <div class="col-lg-3 col-md-6">
+                    <h3>About Us</h3>
+                    <p>Welcome to our one and only finest Restaurant in Dublin to enjoy the authentic India Cusines.</p>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <h3>Subscribe</h3>
+                    <div class="subscribe_form">
+                        <form class="subscribe_form">
+                            <input name="EMAIL" id="subs-email" class="form_input" placeholder="Email Address..." type="email">
+                            <button type="submit" class="submit">SUBSCRIBE</button>
+                            <div class="clearfix"></div>
+                        </form>
+                    </div>
+                    <ul class="list-inline f-social">
+                        <li class="list-inline-item"><a href="#"><i class="fa fa-facebook" aria-hidden="true"></i></a></li>
+                        <li class="list-inline-item"><a href="#"><i class="fa fa-twitter" aria-hidden="true"></i></a></li>
+                        <li class="list-inline-item"><a href="#"><i class="fa fa-linkedin" aria-hidden="true"></i></a></li>
+                        <li class="list-inline-item"><a href="#"><i class="fa fa-google-plus" aria-hidden="true"></i></a></li>
+                        <li class="list-inline-item"><a href="#"><i class="fa fa-instagram" aria-hidden="true"></i></a></li>
+                    </ul>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <h3>Contact information</h3>
+                    <p class="lead">Balls-Bridge Park, Dublin 4, Ireland</p>
+                    <p class="lead"><a href="#">+353 899877079</a></p>
+                    <p><a href="#"> x23220228@student.ncirl.ie</a></p>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <h3>Opening hours</h3>
+                    <p><span class="text-color">Monday: </span>Closed</p>
+                    <p><span class="text-color">Tue-Wed :</span> 9:Am - 10PM</p>
+                    <p><span class="text-color">Thu-Fri :</span> 9:Am - 10PM</p>
+                    <p><span class="text-color">Sat-Sun :</span> 5:PM - 10PM</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="copyright">
+            <div class="container">
+                <div class="row">
+                    <div class="col-lg-12">
+                        <p class="company-name">All Rights Reserved. &copy; 2018 <a href="#">Live Dinner Restaurant</a> Design By : 
+                    <a href="https://html.design/">html design</a></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+    </footer>
+    <!-- End Footer -->
+
+    <!-- Back to top button -->
+    <a href="{% url 'index' %}" id="back-to-top" title="Back to top" style="display: none;"><i class="fa fa-paper-plane-o" aria-hidden="true"></i></a>
+
+    <!-- JavaScript files -->
+    <script src="{% static 'my_rest/js/jquery-3.2.1.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/popper.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/bootstrap.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/jquery.superslides.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/images-loded.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/isotope.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/baguetteBox.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/form-validator.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/contact-form-script.js' %}"></script>
+    <script src="{% static 'my_rest/js/custom.js' %}"></script>
+    <script src="{% static 'my_rest/js/cart.js' %}"></script>
+    
+   <script>
+    // Function to handle adding item to cart and display success message
+    function addToCart(itemId) {
+        // Prevent the default form submission behavior
+        event.preventDefault();
+        
+        // Make a POST request to add the item to cart
+        fetch(`/add-to-cart/${itemId}/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Display success message in a pop-up
+            alert(data.message);
+            // Optionally, you can redirect to the menu page here if needed
+            window.location.href = '{% url "menu" %}';
+        })
+        .catch(error => console.error('Error:', error));
+    }
+</script>
+
+</body>
+</html>

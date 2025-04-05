@@ -1,0 +1,281 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sahil's Kitchen</title>
+    <link rel="apple-touch-icon" href="{% static 'my_rest/images/apple-touch-icon.png'%}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/bootstrap.min.css'%}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/style.css'%}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/responsive.css'%}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/custom.css'%}">
+</head>
+<body>
+    <header class="top-navbar">
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container">
+            <a class="navbar-brand" href="{% url 'index' %}">
+                <h3>Sahil's Kitchen</h3>
+            </a>
+            <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbars-rs-food" aria-controls="navbars-rs-food" aria-expanded="false" aria-label="Toggle navigation">
+              <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbars-rs-food">
+                <ul class="navbar-nav ml-auto">
+                    <li class="nav-item active"><a class="nav-link" href="{% url 'index' %}">Home</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'menu' %}">Menu</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'reservation' %}">Reservation</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'view_cart' %}">View Cart</a></li> <!-- Added View Cart link -->
+                    {% if user.is_authenticated %}
+                        <li class="nav-item">
+                            <span class="nav-link">{{ user.username }}</span>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="{% url 'logout' %}">Logout</a>
+                        </li>
+                    {% else %}
+                        <li class="nav-item"><a class="nav-link" href="{% url 'login' %}">Login</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'signup' %}">Signup</a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+</header>
+
+<!-- Start slides -->
+	<div id="slides" class="cover-slides">
+		<ul class="slides-container">
+			<li class="text-left">
+				<img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/slider-01.jpg" alt="">
+				<div class="container">
+					<div class="row">
+						<div class="col-md-12">
+							<h1 class="m-b-20"><strong>Welcome To <br> Sahil's Kitchen</strong></h1>
+						</div>
+					</div>
+				</div>
+			</li>
+			<li class="text-left">
+				<img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/slider-02.jpg" alt="">
+				<div class="container">
+					<div class="row">
+						<div class="col-md-12">
+							<h1 class="m-b-20"><strong>Welcome To <br> Sahil's Kitchen</strong></h1>
+						</div>
+					</div>
+				</div>
+			</li>
+			<li class="text-left">
+				<img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/slider-03.jpg" alt="">
+				<div class="container">
+					<div class="row">
+						<div class="col-md-12">
+							<h1 class="m-b-20"><strong>Welcome To <br> Sahil's Kitchen</strong></h1>
+						</div>
+					</div>
+				</div>
+			</li>
+		</ul>
+		<div class="slides-navigation">
+			<a href="#" class="next"><i class="fa fa-angle-right" aria-hidden="true"></i></a>
+			<a href="#" class="prev"><i class="fa fa-angle-left" aria-hidden="true"></i></a>
+		</div>
+	</div>
+	<!-- End slides -->
+	
+	
+    <!-- Start Menu -->
+    <div class="menu-box">
+        <div class="container">
+            <div class="row">
+                <div class="col-lg-12">
+                    <div class="heading-title text-center">
+                        <h2>Our Menu</h2>
+                        <p>Check out our delicious menu!</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Menu Items -->
+            <div class="row">
+                <div class="col-lg-4 col-md-6 special-grid dinner">
+                    <div class="gallery-single fix">
+                        <img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/index_menu/Starter_1.jpg" class="img-fluid" alt="Menu Item">
+                        <div class="why-text">
+                            <h3>Starters</h3>
+                            <h4>Chicken Chilli</h4>
+                            <p>Chilli chicken is a popular Indo-Chinese dish that uses chicken, and is of Hakka Chinese heritage. In India, this may include a variety of dry chicken preparations. Though mainly boneless chicken is used in this dish, some recipes also use bone-in chicken.</p>
+                            <h5>EUR 9.99</h5>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6 special-grid dinner">
+                    <div class="gallery-single fix">
+                        <img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/index_menu/Starter_2.jpg" class="img-fluid" alt="Menu Item">
+                        <div class="why-text">
+                            <h3>Starters</h3>
+                            <h4>Chicken Lollipop</h4>
+                            <p>Chicken lollipop is a popular Indo-Chinese fried chicken appetiser. Chicken lollipop is essentially a frenched chicken winglet, wherein the meat is cut loose from the bone end and pushed down, creating a lollipop appearance.</p>
+                            <h5>EUR 11.99</h5>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6 special-grid dinner">
+                    <div class="gallery-single fix">
+                        <img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/index_menu/Main_1.jpeg" class="img-fluid" alt="Menu Item">
+                        <div class="why-text">
+                            <h3>Main Course</h3>
+                            <h4>Chicken Biriyani</h4>
+                            <p>Biryani is a mixed rice dish, mainly popular in South Asia. It is made with rice, some type of meat and spices. To cater to vegetarians, in some cases, it is prepared by substituting vegetables for the meat. Sometimes eggs and/or potatoes are also added.</p>
+                            <h5>EUR 8.99</h5>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6 special-grid dinner">
+                    <div class="gallery-single fix">
+                        <img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/index_menu/Main_2.jpg" class="img-fluid" alt="Menu Item">
+                        <div class="why-text">
+                            <h3>Main Course</h3>
+                            <h4>Veg Biriyani</h4>
+                            <p>This Vegetable Biryani hits all the right spots with its wonderful aroma and exotic flavors! Loaded with veggies, crunchy cashews, warm spices like saffron, herbs like cilantro and mint, this biryani is a delight to the taste buds in every bite!</p>
+                            <h5>EUR 14.99</h5>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6 special-grid dinner">
+                    <div class="gallery-single fix">
+                        <img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/index_menu/Dessert_1.jpg" class="img-fluid" alt="Menu Item">
+                        <div class="why-text">
+                            <h3>Desserts</h3>
+                            <h4>Shahi Tukra</h4>
+                            <p>Shahi Tukda is a rich, royal and popular dessert from the Mughlai Cuisine. It is made of ghee fried bread slices that are soaked in rose & cardamom scented sugar syrup which are topped with fragrant, creamy, sweetened, thickened milk (a.k.a rabdi) that is flavored with exotic saffron.</p>
+                            <h5>EUR 10.99</h5>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-6 special-grid dinner">
+                    <div class="gallery-single fix">
+                        <img src="https://x23220228-restaurant-website.s3.eu-west-1.amazonaws.com/images/index_menu/Dessert_2.jpg" class="img-fluid" alt="Menu Item">
+                        <div class="why-text">
+                            <h3>Desserts</h3>
+                            <h4>Rabri</h4>
+                            <p>Rabri also known as Rabdi is a North Indian traditional sweet dish made with full fat milk, sugar, cardamoms and nuts. It is served as a dessert or along with Malpua, Gulab Jamun, Jalebi and Poori. Rabri tastes very delicious, creamy & is full of flavors from the cardamoms and saffron.</p>
+                            <h5>EUR 12.99</h5>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- End Menu -->
+
+    <!-- Start Contact info -->
+    <div class="contact-imfo-box">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-4 arrow-right">
+                    <i class="fa fa-volume-control-phone"></i>
+                    <div class="overflow-hidden">
+                        <h4>Phone</h4>
+                        <p class="lead">+353899877079</p>
+                    </div>
+                </div>
+                <div class="col-md-4 arrow-right">
+                    <i class="fa fa-envelope"></i>
+                    <div class="overflow-hidden">
+                        <h4>Email</h4>
+                        <p class="lead">x23220228@student.ncirl.ie</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <i class="fa fa-map-marker"></i>
+                    <div class="overflow-hidden">
+                        <h4>Location</h4>
+                        <p class="lead">Dublin 4, Ireland</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- End Contact info -->
+
+	<!-- Start Footer -->
+	<footer class="footer-area bg-f">
+		<div class="container">
+			<div class="row">
+				<div class="col-lg-3 col-md-6">
+					<h3>About Us</h3>
+					<p>Welcome to our one and only finest Restaurant in Dublin to enjoy the authentic India Cusines.</p>
+				</div>
+				<div class="col-lg-3 col-md-6">
+					<h3>Subscribe</h3>
+					<div class="subscribe_form">
+						<form class="subscribe_form">
+							<input name="EMAIL" id="subs-email" class="form_input" placeholder="Email Address..." type="email">
+							<button type="submit" class="submit">SUBSCRIBE</button>
+							<div class="clearfix"></div>
+						</form>
+					</div>
+					<ul class="list-inline f-social">
+						<li class="list-inline-item"><a href="#"><i class="fa fa-facebook" aria-hidden="true"></i></a></li>
+						<li class="list-inline-item"><a href="#"><i class="fa fa-twitter" aria-hidden="true"></i></a></li>
+						<li class="list-inline-item"><a href="#"><i class="fa fa-linkedin" aria-hidden="true"></i></a></li>
+						<li class="list-inline-item"><a href="#"><i class="fa fa-google-plus" aria-hidden="true"></i></a></li>
+						<li class="list-inline-item"><a href="#"><i class="fa fa-instagram" aria-hidden="true"></i></a></li>
+					</ul>
+				</div>
+				<div class="col-lg-3 col-md-6">
+					<h3>Contact information</h3>
+					<p class="lead">Balls-Bridge Park, Dublin 4, Ireland</p>
+					<p class="lead"><a href="#">+353 899877079</a></p>
+					<p><a href="#"> x23220228@student.ncirl.ie</a></p>
+				</div>
+				<div class="col-lg-3 col-md-6">
+					<h3>Opening hours</h3>
+					<p><span class="text-color">Monday: </span>Closed</p>
+					<p><span class="text-color">Tue-Wed :</span> 9:Am - 10PM</p>
+					<p><span class="text-color">Thu-Fri :</span> 9:Am - 10PM</p>
+					<p><span class="text-color">Sat-Sun :</span> 5:PM - 10PM</p>
+				</div>
+			</div>
+		</div>
+		
+		<div class="copyright">
+			<div class="container">
+				<div class="row">
+					<div class="col-lg-12">
+						<p class="company-name">All Rights Reserved. &copy; 2018 <a href="#">Live Dinner Restaurant</a> Design By : 
+					<a href="https://html.design/">html design</a></p>
+					</div>
+				</div>
+			</div>
+		</div>
+		
+	</footer>
+	<!-- End Footer -->
+	
+    <!-- Back to top button -->
+    <a href="{% url 'index' %}" id="back-to-top" title="Back to top" style="display: none;"><i class="fa fa-paper-plane-o" aria-hidden="true"></i></a>
+
+    <!-- JavaScript files -->
+    <script src="{% static 'my_rest/js/jquery-3.2.1.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/popper.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/bootstrap.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/jquery.superslides.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/images-loded.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/isotope.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/baguetteBox.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/form-validator.min.js'%}"></script>
+    <script src="{% static 'my_rest/js/contact-form-script.js'%}"></script>
+    <script src="{% static 'my_rest/js/custom.js'%}"></script>
+</body>
+</html>

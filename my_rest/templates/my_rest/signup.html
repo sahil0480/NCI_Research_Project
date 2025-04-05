@@ -1,0 +1,85 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up</title>
+    <link rel="shortcut icon" href="{% static 'my_rest/images/favicon.ico' %}" type="image/x-icon">
+    <link rel="apple-touch-icon" href="{% static 'my_rest/images/apple-touch-icon.png' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/style.css' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/responsive.css' %}">
+    <link rel="stylesheet" href="{% static 'my_rest/css/custom.css' %}">
+    <style>
+        /* Additional CSS styles */
+        .card {
+            border: none;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+        }
+        .card-header {
+            background-color: #f8f9fa;
+            border-bottom: none;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-control {
+            border-radius: 0;
+        }
+        label {
+            font-weight: bold;
+        }
+        button[type="submit"] {
+            background-color: #007bff;
+            border-radius: 0;
+            border: none;
+        }
+        button[type="submit"]:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card mt-5">
+                    <div class="card-header">
+                        <h2 class="text-center">Sign Up</h2>
+                    </div>
+                    <div class="card-body">
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="form-group">
+                                <label for="id_username">Username</label>
+                                {{ form.username }}
+                            </div>
+                            <div class="form-group">
+                                <label for="id_password1">Password</label>
+                                {{ form.password1 }}
+                            </div>
+                            <div class="form-group">
+                                <label for="id_password2">Confirm Password</label>
+                                {{ form.password2 }}
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">Sign Up</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="{% static 'my_rest/js/jquery-3.2.1.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/popper.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/bootstrap.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/jquery.superslides.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/images-loded.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/isotope.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/baguetteBox.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/form-validator.min.js' %}"></script>
+    <script src="{% static 'my_rest/js/contact-form-script.js' %}"></script>
+    <script src="{% static 'my_rest/js/custom.js' %}"></script>
+</body>
+</html>
