@@ -21,7 +21,19 @@ spec:
             - containerPort: 8000
           env:
             - name: DEBUG
-              value: "False"
+              value: "True"
+            - name: SECRET_KEY
+              value: "bun6+_ovp679c-z=h6bh1=tj%z3suy1eg(xs^#jkj(z0y8)^0u"
+            - name: DB_NAME
+              value: "Research_Project"
+            - name: DB_USER
+              value: "django_user"
+            - name: DB_PASSWORD
+              value: "django_pass"
+            - name: DB_HOST
+              value: "db"
+            - name: DB_PORT
+              value: "5432"
           resources:
             requests:
               cpu: "100m"
