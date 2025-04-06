@@ -1,46 +1,84 @@
-name: Deploy Django to GCP on Push
+name: Deploy to GKE
 
 on:
   push:
     branches:
-      - master  # or main if you're using that
+      - main
 
 jobs:
   deploy:
-    name: Build and Deploy to GCP
+    name: Build and Deploy
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
     steps:
-      - name: Checkout Code
+      - name: 🧾 Checkout code
         uses: actions/checkout@v3
 
-      - name: Authenticate with GCP
+      - name: 🔐 Authenticate with Google Cloud
         uses: google-github-actions/auth@v1
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Set up Cloud SDK
+      - name: ☁️ Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker europe-west1-docker.pkg.dev
+
+      - name: ⚙️ Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: nci-research-project
-          export_default_credentials: true
 
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet
-
-      - name: Build and Push Docker Image
+      - name: 🔧 Set up GKE credentials
         run: |
-          docker build -t europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:latest .
-          docker push europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:latest
+          gcloud container clusters get-credentials gke-nci-research-cluster \
+            --region europe-west1 \
+            --project nci-research-project
 
-      - name: Deploy to GKE
-        uses: google-github-actions/get-gke-credentials@v1
-        with:
-          cluster_name: nci-research-cluster
-          location: europe-west1
-          project_id: nci-research-project
+      - name: 🏷️ Define image tag
+        id: vars
+        run: echo "TAG=commit-${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      - name: Apply Kubernetes Resources
+      - name: 🐳 Build and Push Docker Image
         run: |
-          kubectl apply -f k8s/deployment.yaml
-          kubectl apply -f k8s/service.yaml
+          docker build -t europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:$TAG .
+          docker push europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:$TAG
+
+      - name: 🚀 Update GKE Deployment
+        run: |
+          kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:$TAG --record
+
+      - name: ⏳ Wait for rollout to complete
+        run: |
+          kubectl rollout status deployment/django-app
+
+      - name: 🔁 Run migrations
+        run: |
+          POD_NAME=$(kubectl get pods -l app=django-app -o jsonpath="{.items[0].metadata.name}")
+          kubectl exec -it $POD_NAME -- python manage.py migrate
+
+      - name: 🧱 Collect static files
+        run: |
+          POD_NAME=$(kubectl get pods -l app=django-app -o jsonpath="{.items[0].metadata.name}")
+          kubectl exec -it $POD_NAME -- python manage.py collectstatic --noinput
+
+      - name: 🧹 Clean up old ReplicaSets
+        run: |
+          echo "🔍 Getting current replicaset..."
+          CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
+          
+          echo "🗑️ Deleting all old ReplicaSets except: $CURRENT_RS"
+          for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
+            if [[ "$rs" != "$CURRENT_RS" ]]; then
+              echo "➤ Deleting old replicaset: $rs"
+              kubectl delete rs $rs
+            fi
+          done
+
+      - name: 🧼 Delete unused/evicted pods
+        run: |
+          echo "🧹 Deleting evicted/failed pods..."
+          kubectl get pods --field-selector=status.phase!=Running --no-headers -o custom-columns=":metadata.name" | xargs -r kubectl delete pod
