@@ -34,7 +34,7 @@ jobs:
 
       - name: 🔧 Set up GKE credentials
         run: |
-          gcloud container clusters get-credentials gke-nci-research-cluster \
+          gcloud container clusters get-credentials nci-research-cluster \
             --region europe-west1 \
             --project nci-research-project
 
