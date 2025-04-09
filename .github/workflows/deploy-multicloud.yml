@@ -36,8 +36,7 @@ jobs:
           project_id: nci-research-project
 
       - name: Configure Docker for GCP Artifact Registry
-        run: |
-          gcloud auth configure-docker europe-west1-docker.pkg.dev
+        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
       - name: Authenticate GKE Cluster
         run: |
@@ -81,7 +80,6 @@ jobs:
       ########################################
       - name: Deploy to GKE
         run: |
-          kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
@@ -90,17 +88,14 @@ jobs:
       ########################################
       - name: Deploy to AKS
         run: |
-          kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
           kubectl set image deployment/django-app django-container=nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
       ########################################
       # -- OPTIONAL STATIC FILES COLLECTION #
       ########################################
-      # Uncomment this if you need collectstatic to run post-deploy
       # - name: Collect static files in GKE
       #   run: |
-      #     kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
       #     POD=$(kubectl get pods -l app=django-app -o jsonpath="{.items[0].metadata.name}")
       #     kubectl exec $POD -- python manage.py collectstatic --noinput
 
@@ -109,7 +104,6 @@ jobs:
       ########################################
       - name: Clean up old ReplicaSets in GKE
         run: |
-          kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
@@ -119,7 +113,6 @@ jobs:
 
       - name: Clean up old ReplicaSets in AKS
         run: |
-          kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
