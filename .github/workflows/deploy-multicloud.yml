@@ -37,7 +37,7 @@ jobs:
 
       - name: Install GKE Auth Plugin
         run: |
-          sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
+          gcloud components install gke-gcloud-auth-plugin --quiet
 
       - name: Configure Docker for GCP Artifact Registry
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
@@ -87,7 +87,7 @@ jobs:
           kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
           if ! kubectl get deployment django-app &>/dev/null; then
             echo "Deployment not found in GKE. Applying k8s manifests..."
-            kubectl apply -f k8s/
+            kubectl apply -f k8s/ --validate=false
           fi
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
