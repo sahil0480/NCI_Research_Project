@@ -35,7 +35,7 @@ jobs:
         with:
           project_id: nci-research-project
 
-      - name: Configure Docker to use GCP Artifact Registry
+      - name: Configure Docker for GCP Artifact Registry
         run: |
           gcloud auth configure-docker europe-west1-docker.pkg.dev
 
@@ -51,35 +51,30 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v1
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_KEY }}
 
-      - name: Set AKS Credentials
+      - name: Set AKS Context
         uses: azure/aks-set-context@v3
         with:
           resource-group: nci-azure-rg
           cluster-name: nci-aks-cluster
 
       - name: Azure ACR Login
-        run: |
-          az acr login --name nciregistryacr
+        run: az acr login --name nciregistryacr
 
       ########################################
       # --------- BUILD & PUSH ------------- #
       ########################################
-      - name: Build Docker Image
+      - name: Build Docker Images for GCP & Azure
         run: |
           docker build -t europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
                        -t nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
 
       - name: Push to GCP Artifact Registry
-        run: |
-          docker push europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        run: docker push europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
       - name: Push to Azure ACR
-        run: |
-          docker push nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        run: docker push nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
       ########################################
       # ------- DEPLOY TO GCP -------------- #
@@ -100,9 +95,19 @@ jobs:
           kubectl rollout status deployment/django-app
 
       ########################################
-      # ------ OPTIONAL CLEANUP ------------ #
+      # -- OPTIONAL STATIC FILES COLLECTION #
       ########################################
-      - name: Clean up old ReplicaSets (GKE)
+      # Uncomment this if you need collectstatic to run post-deploy
+      # - name: Collect static files in GKE
+      #   run: |
+      #     kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
+      #     POD=$(kubectl get pods -l app=django-app -o jsonpath="{.items[0].metadata.name}")
+      #     kubectl exec $POD -- python manage.py collectstatic --noinput
+
+      ########################################
+      # ------ CLEANUP OLD REPLICASETS ----- #
+      ########################################
+      - name: Clean up old ReplicaSets in GKE
         run: |
           kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
@@ -112,7 +117,7 @@ jobs:
             fi
           done
 
-      - name: Clean up old ReplicaSets (AKS)
+      - name: Clean up old ReplicaSets in AKS
         run: |
           kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
