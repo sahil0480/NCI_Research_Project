@@ -38,12 +38,6 @@ jobs:
       - name: Configure Docker for GCP Artifact Registry
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
-      - name: Authenticate GKE Cluster
-        run: |
-          gcloud container clusters get-credentials nci-research-cluster \
-            --region europe-west1 \
-            --project nci-research-project
-
       ########################################
       # --------- AZURE SETUP -------------- #
       ########################################
@@ -80,11 +74,15 @@ jobs:
       ########################################
       - name: Deploy to GKE
         run: |
-          kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
+          gcloud container clusters get-credentials nci-research-cluster \
+            --region europe-west1 \
+            --project nci-research-project
+
           if ! kubectl get deployment django-app &>/dev/null; then
-            echo "Deployment not found in GKE. Applying k8s manifests..."
+            echo "Deployment not found in GKE. Applying manifests..."
             kubectl apply -f k8s/
           fi
+
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
@@ -93,11 +91,11 @@ jobs:
       ########################################
       - name: Deploy to AKS
         run: |
-          kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
           if ! kubectl get deployment django-app &>/dev/null; then
-            echo "Deployment not found in AKS. Applying k8s manifests..."
+            echo "Deployment not found in AKS. Applying manifests..."
             kubectl apply -f k8s/
           fi
+
           kubectl set image deployment/django-app django-container=nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
@@ -106,7 +104,10 @@ jobs:
       ########################################
       - name: Clean up old ReplicaSets in GKE
         run: |
-          kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
+          gcloud container clusters get-credentials nci-research-cluster \
+            --region europe-west1 \
+            --project nci-research-project
+
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
@@ -116,7 +117,6 @@ jobs:
 
       - name: Clean up old ReplicaSets in AKS
         run: |
-          kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
