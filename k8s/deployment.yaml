@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: django-container
-          image: europe-west1-docker.pkg.dev/nci-research-project/django-repo/django-app:latest
+          image: PLACEHOLDER_IMAGE  # 🔁 Replaced dynamically in GitHub Action
           ports:
             - containerPort: 8000
           env:
@@ -36,7 +36,7 @@ spec:
               value: "5432"
           volumeMounts:
             - name: media-storage
-              mountPath: /app/media  # 👈 This matches your MEDIA_ROOT
+              mountPath: /app/media  # 👈 Maps to MEDIA_ROOT in Django
           resources:
             requests:
               cpu: "100m"
