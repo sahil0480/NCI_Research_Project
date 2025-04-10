@@ -35,15 +35,12 @@ jobs:
         with:
           project_id: nci-research-project
 
-      - name: Install GKE Auth Plugin
-        run: |
-          gcloud components install gke-gcloud-auth-plugin --quiet
-
       - name: Configure Docker for GCP Artifact Registry
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
       - name: Authenticate GKE Cluster
         run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
           gcloud container clusters get-credentials nci-research-cluster \
             --region europe-west1 \
             --project nci-research-project
@@ -80,28 +77,34 @@ jobs:
         run: docker push nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
       ########################################
-      # ------- DEPLOY TO GCP -------------- #
+      # ------- DEPLOY TO GKE -------------- #
       ########################################
       - name: Deploy to GKE
         run: |
-          kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
+          CONTEXT=$(kubectl config current-context)
+          echo "Using context: $CONTEXT"
+
           if ! kubectl get deployment django-app &>/dev/null; then
             echo "Deployment not found in GKE. Applying k8s manifests..."
             kubectl apply -f k8s/ --validate=false
           fi
+
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
       ########################################
-      # ------- DEPLOY TO AZURE ------------ #
+      # ------- DEPLOY TO AKS -------------- #
       ########################################
       - name: Deploy to AKS
         run: |
-          kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
+          CONTEXT=$(kubectl config current-context)
+          echo "Using context: $CONTEXT"
+
           if ! kubectl get deployment django-app &>/dev/null; then
             echo "Deployment not found in AKS. Applying k8s manifests..."
-            kubectl apply -f k8s/
+            kubectl apply -f k8s/ --validate=false
           fi
+
           kubectl set image deployment/django-app django-container=nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
@@ -110,7 +113,8 @@ jobs:
       ########################################
       - name: Clean up old ReplicaSets in GKE
         run: |
-          kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
+          CONTEXT=$(kubectl config current-context)
+          echo "Using context: $CONTEXT"
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
@@ -120,7 +124,8 @@ jobs:
 
       - name: Clean up old ReplicaSets in AKS
         run: |
-          kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
+          CONTEXT=$(kubectl config current-context)
+          echo "Using context: $CONTEXT"
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
