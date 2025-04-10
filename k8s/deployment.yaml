@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: django-container
-          image: PLACEHOLDER_IMAGE  # This will be replaced during GitHub Actions runtime
+          image: PLACEHOLDER_IMAGE  # This gets replaced dynamically in GitHub Actions
           ports:
             - containerPort: 8000
           env:
@@ -37,22 +37,27 @@ spec:
           volumeMounts:
             - name: media-storage
               mountPath: /app/media
+
+          # ⏱️ More forgiving readiness probe (helps avoid false "unready" during startup)
           readinessProbe:
             httpGet:
               path: /
               port: 8000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 40
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 5
+            failureThreshold: 10
+
+          # 💓 Health check for liveliness with more delay tolerance
           livenessProbe:
             httpGet:
               path: /
               port: 8000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 20
             timeoutSeconds: 5
-            failureThreshold: 3
+            failureThreshold: 5
+
           resources:
             requests:
               cpu: "100m"
@@ -60,6 +65,7 @@ spec:
             limits:
               cpu: "200m"
               memory: "256Mi"
+
       volumes:
         - name: media-storage
           persistentVolumeClaim:

@@ -1,4 +1,4 @@
-name: Multi-Cloud Deploy to GKE and AKS
+name: Multi-Cloud Parallel Deploy to GKE and AKS
 
 on:
   push:
@@ -18,148 +18,94 @@ env:
   AZURE_ACR_NAME: nciregistryacr
 
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-
+    outputs:
+      image_tag: ${{ steps.set-tag.outputs.tag }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      ########################################
-      # --------- GCP SETUP ---------------- #
-      ########################################
-      - name: Authenticate to Google Cloud
+      - name: Set image tag
+        id: set-tag
+        run: echo "tag=commit-${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GCP Artifact Registry
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Set up gcloud SDK
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
+
+      - name: Login to Azure ACR
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_KEY }}
+
+      - name: Azure ACR Login
+        run: az acr login --name ${{ env.AZURE_ACR_NAME }}
+
+      - name: Build and Push Docker Images
+        run: |
+          docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
+                       -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} .
+          docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+          docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+
+  deploy-gcp:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Configure Docker for GCP Artifact Registry
-        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
+      - name: Get GKE credentials
+        run: gcloud container clusters get-credentials nci-research-cluster --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Authenticate and Set GKE Context
+      - name: Deploy to GKE
         run: |
-          gcloud components install gke-gcloud-auth-plugin --quiet
-          gcloud container clusters get-credentials nci-research-cluster \
-            --region ${{ env.GCP_REGION }} \
-            --project ${{ env.GCP_PROJECT_ID }}
-          echo "🟢 GKE context: $(kubectl config current-context)"
+          IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          echo "Using GKE image: $IMAGE"
+          sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/service.yaml
+          kubectl rollout status deployment django-app
 
-      - name: Assign IAM roles to GCP SA (optional)
-        if: env.ASSIGN_GCP_ROLES == 'true'
-        run: |
-          for role in artifactregistry.writer container.admin container.developer iam.serviceAccountTokenCreator; do
-            gcloud projects add-iam-policy-binding ${{ env.GCP_PROJECT_ID }} \
-              --member="serviceAccount:${{ env.GCP_SA_EMAIL }}" \
-              --role="roles/$role" --quiet || echo "Role $role already assigned or skipped."
-          done
+  deploy-azure:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-      ########################################
-      # --------- AZURE SETUP -------------- #
-      ########################################
       - name: Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
 
-      - name: Set AKS Context
+      - name: Set AKS context
         uses: azure/aks-set-context@v3
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
-      - name: Azure ACR Login
-        run: az acr login --name ${{ env.AZURE_ACR_NAME }}
-
-      - name: Assign Contributor role to Azure SP (optional)
-        if: env.ASSIGN_AZURE_ROLES == 'true'
-        run: |
-          CLIENT_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.clientId')
-          SUB_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.subscriptionId')
-          ASSIGNEE_ID=$(az ad sp show --id "$CLIENT_ID" --query "id" -o tsv)
-          ROLE_EXISTS=$(az role assignment list \
-            --assignee "$ASSIGNEE_ID" \
-            --scope "/subscriptions/$SUB_ID" \
-            --query "[?roleDefinitionName=='Contributor']" -o tsv)
-          if [[ -z "$ROLE_EXISTS" ]]; then
-            echo "Assigning Contributor role..."
-            az role assignment create \
-              --assignee "$ASSIGNEE_ID" \
-              --role Contributor \
-              --scope "/subscriptions/$SUB_ID"
-          else
-            echo "Contributor role already exists."
-          fi
-
-      ########################################
-      # --------- BUILD & PUSH ------------- #
-      ########################################
-      - name: Build Docker Image
-        run: |
-          docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
-                       -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
-
-      - name: Push to GCP Artifact Registry
-        run: docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-      - name: Push to Azure ACR
-        run: docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-      ########################################
-      # ------- DEPLOY TO GKE -------------- #
-      ########################################
-      - name: Deploy to GKE
-        run: |
-          IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          echo "🚀 Deploying to GKE using image: $IMAGE"
-          sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/service.yaml
-          kubectl rollout status deployment django-app
-
-      - name: Cleanup Failed Pods and Old ReplicaSets in GKE
-        run: |
-          echo "🧹 Cleaning failed pods in GKE..."
-          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
-          if [[ -n "$FAILED_PODS" ]]; then
-            kubectl delete pod $FAILED_PODS
-          fi
-
-          echo "🧹 Cleaning unused ReplicaSets in GKE..."
-          RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
-          for rs in $RS_TO_DELETE; do
-            echo "Deleting unused RS: $rs"
-            kubectl delete rs $rs
-          done
-
-      ########################################
-      # ------- DEPLOY TO AKS -------------- #
-      ########################################
       - name: Deploy to AKS
         run: |
-          IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          echo "🚀 Deploying to AKS using image: $IMAGE"
+          IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          echo "Using AKS image: $IMAGE"
           sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
-
-      - name: Cleanup Failed Pods and Old ReplicaSets in AKS
-        run: |
-          echo "🧹 Cleaning failed pods in AKS..."
-          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
-          if [[ -n "$FAILED_PODS" ]]; then
-            kubectl delete pod $FAILED_PODS
-          fi
-
-          echo "🧹 Cleaning unused ReplicaSets in AKS..."
-          RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
-          for rs in $RS_TO_DELETE; do
-            echo "Deleting unused RS: $rs"
-            kubectl delete rs $rs
-          done
