@@ -28,9 +28,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      #################################################
-      # ---------------- GCP SETUP ------------------ #
-      #################################################
+      ##########################
+      # ---- GCP SETUP ------- #
+      ##########################
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
         with:
@@ -57,12 +57,12 @@ jobs:
           for role in artifactregistry.writer container.admin container.developer iam.serviceAccountTokenCreator; do
             gcloud projects add-iam-policy-binding ${{ env.GCP_PROJECT_ID }} \
               --member="serviceAccount:${{ env.GCP_SA_EMAIL }}" \
-              --role="roles/$role" --quiet || echo "Role $role already assigned or skipped."
+              --role="roles/$role" --quiet || echo "Skipped or already assigned: $role"
           done
 
-      #################################################
-      # --------------- AZURE SETUP ----------------- #
-      #################################################
+      #############################
+      # ---- AZURE SETUP -------- #
+      #############################
       - name: Login to Azure
         uses: azure/login@v1
         with:
@@ -97,9 +97,9 @@ jobs:
             echo "Contributor role already exists."
           fi
 
-      #################################################
-      # ----------- BUILD & PUSH IMAGES ------------- #
-      #################################################
+      #####################################
+      # ---- BUILD & PUSH TO BOTH ------- #
+      #####################################
       - name: Build Docker Image
         run: |
           docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
@@ -111,9 +111,13 @@ jobs:
       - name: Push to Azure ACR
         run: docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-      #################################################
-      # ---------------- DEPLOY GKE ----------------- #
-      #################################################
+      ###########################
+      # ---- DEPLOY TO GKE ---- #
+      ###########################
+      - name: Force Context to GKE
+        run: |
+          kubectl config use-context gke_${{ env.GCP_PROJECT_ID }}_${{ env.GCP_REGION }}_nci-research-cluster
+
       - name: Deploy to GKE
         run: |
           export IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
@@ -122,26 +126,27 @@ jobs:
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
 
-      - name: Cleanup Failed Pods and Old ReplicaSets in GKE
+      - name: Cleanup Failed Pods and Old RS (GKE)
         run: |
           echo "🧹 Cleaning failed pods in GKE..."
-          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
-          if [[ -n "$FAILED_PODS" ]]; then
-            kubectl delete pod $FAILED_PODS --ignore-not-found
-          else
-            echo "No failed pods to delete."
-          fi
+          PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
+          [ -n "$PODS" ] && kubectl delete pod $PODS || echo "No failed pods to delete."
 
           echo "🧹 Cleaning unused ReplicaSets in GKE..."
           RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
           for rs in $RS_TO_DELETE; do
-            echo "Deleting unused RS: $rs"
             kubectl delete rs $rs
           done
 
-      #################################################
-      # ---------------- DEPLOY AKS ----------------- #
-      #################################################
+      ###########################
+      # ---- DEPLOY TO AKS ---- #
+      ###########################
+      - name: Force Context to AKS
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
+
       - name: Deploy to AKS
         run: |
           export IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
@@ -150,19 +155,14 @@ jobs:
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
 
-      - name: Cleanup Failed Pods and Old ReplicaSets in AKS
+      - name: Cleanup Failed Pods and Old RS (AKS)
         run: |
           echo "🧹 Cleaning failed pods in AKS..."
-          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
-          if [[ -n "$FAILED_PODS" ]]; then
-            kubectl delete pod $FAILED_PODS --ignore-not-found
-          else
-            echo "No failed pods to delete."
-          fi
+          PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
+          [ -n "$PODS" ] && kubectl delete pod $PODS || echo "No failed pods to delete."
 
           echo "🧹 Cleaning unused ReplicaSets in AKS..."
           RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
           for rs in $RS_TO_DELETE; do
-            echo "Deleting unused RS: $rs"
             kubectl delete rs $rs
           done
