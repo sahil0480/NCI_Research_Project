@@ -35,14 +35,33 @@ jobs:
         with:
           project_id: nci-research-project
 
-      - name: Install GKE Auth Plugin
-        run: gcloud components install gke-gcloud-auth-plugin --quiet
+      - name: Configure Docker for GCP Artifact Registry
+        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
       - name: Authenticate GKE Cluster
         run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
           gcloud container clusters get-credentials nci-research-cluster \
             --region europe-west1 \
             --project nci-research-project
+
+      - name: Ensure GCP Service Account Has Required Roles
+        run: |
+          gcloud projects add-iam-policy-binding nci-research-project \
+            --member="serviceAccount:github-ci-cd@nci-research-project.iam.gserviceaccount.com" \
+            --role="roles/artifactregistry.writer" --quiet
+
+          gcloud projects add-iam-policy-binding nci-research-project \
+            --member="serviceAccount:github-ci-cd@nci-research-project.iam.gserviceaccount.com" \
+            --role="roles/container.developer" --quiet
+
+          gcloud projects add-iam-policy-binding nci-research-project \
+            --member="serviceAccount:github-ci-cd@nci-research-project.iam.gserviceaccount.com" \
+            --role="roles/container.admin" --quiet
+
+          gcloud projects add-iam-policy-binding nci-research-project \
+            --member="serviceAccount:github-ci-cd@nci-research-project.iam.gserviceaccount.com" \
+            --role="roles/iam.serviceAccountTokenCreator" --quiet
 
       ########################################
       # --------- AZURE SETUP -------------- #
@@ -61,6 +80,29 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name nciregistryacr
 
+      - name: Ensure Azure SP has Contributor Role
+        run: |
+          CLIENT_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.clientId')
+          SUBSCRIPTION_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.subscriptionId')
+
+          ASSIGNEE_ID=$(az ad sp show --id "$CLIENT_ID" --query "id" -o tsv)
+          echo "Assignee ID: $ASSIGNEE_ID"
+
+          EXISTING_ROLE=$(az role assignment list \
+            --assignee "$ASSIGNEE_ID" \
+            --scope "/subscriptions/$SUBSCRIPTION_ID" \
+            --query "[?roleDefinitionName=='Contributor']" -o tsv)
+
+          if [ -z "$EXISTING_ROLE" ]; then
+            echo "Assigning Contributor role to Azure SP..."
+            az role assignment create \
+              --assignee "$ASSIGNEE_ID" \
+              --role Contributor \
+              --scope "/subscriptions/$SUBSCRIPTION_ID"
+          else
+            echo "Azure SP already has Contributor role."
+          fi
+
       ########################################
       # --------- BUILD & PUSH ------------- #
       ########################################
@@ -76,12 +118,11 @@ jobs:
         run: docker push nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
       ########################################
-      # -- CLEANUP + DEPLOY TO GKE --------- #
+      # ------- CLEANUP OLD RS (GKE) ------- #
       ########################################
       - name: Cleanup old ReplicaSets in GKE
         run: |
           kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
-          echo "Cleaning up old ReplicaSets in GKE..."
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
@@ -89,23 +130,25 @@ jobs:
             fi
           done
 
+      ########################################
+      # ------- DEPLOY TO GKE -------------- #
+      ########################################
       - name: Deploy to GKE
         run: |
           kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
           if ! kubectl get deployment django-app &>/dev/null; then
-            echo "Deployment not found in GKE. Applying k8s manifests..."
+            echo "Deployment not found in GKE. Applying manifests..."
             kubectl apply -f k8s/ --validate=false
           fi
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
       ########################################
-      # -- CLEANUP + DEPLOY TO AKS --------- #
+      # ------- CLEANUP OLD RS (AKS) ------- #
       ########################################
       - name: Cleanup old ReplicaSets in AKS
         run: |
           kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
-          echo "Cleaning up old ReplicaSets in AKS..."
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
@@ -113,11 +156,14 @@ jobs:
             fi
           done
 
+      ########################################
+      # ------- DEPLOY TO AKS -------------- #
+      ########################################
       - name: Deploy to AKS
         run: |
           kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
           if ! kubectl get deployment django-app &>/dev/null; then
-            echo "Deployment not found in AKS. Applying k8s manifests..."
+            echo "Deployment not found in AKS. Applying manifests..."
             kubectl apply -f k8s/ --validate=false
           fi
           kubectl set image deployment/django-app django-container=nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
