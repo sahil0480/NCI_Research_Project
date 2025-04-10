@@ -16,7 +16,6 @@ env:
   AZURE_RESOURCE_GROUP: nci-azure-rg
   AZURE_AKS_CLUSTER: nci-aks-cluster
   AZURE_ACR_NAME: nciregistryacr
-  
 
 jobs:
   deploy:
@@ -43,7 +42,7 @@ jobs:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Configure Docker for GCP Artifact Registry
-        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev
 
       - name: Authenticate GKE Cluster
         run: |
@@ -103,11 +102,11 @@ jobs:
       ########################################
       - name: Build Docker Image
         run: |
-          docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+          docker build -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
                        -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
 
       - name: Push to GCP Artifact Registry
-        run: docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        run: docker push ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
       - name: Push to Azure ACR
         run: docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
@@ -117,7 +116,7 @@ jobs:
       ########################################
       - name: Cleanup ReplicaSets in GKE
         run: |
-          kubectl config use-context gke_${{ env.GCP_PROJECT_ID }}_${{ env.GCP_ZONE }}_nci-research-cluster
+          kubectl config use-context gke_${{ env.GCP_PROJECT_ID }}_${{ env.GCP_REGION }}_nci-research-cluster
           CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
           for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
             if [[ "$rs" != "$CURRENT_RS" ]]; then
@@ -127,12 +126,12 @@ jobs:
 
       - name: Deploy to GKE
         run: |
-          kubectl config use-context gke_${{ env.GCP_PROJECT_ID }}_${{ env.GCP_ZONE }}_nci-research-cluster
+          kubectl config use-context gke_${{ env.GCP_PROJECT_ID }}_${{ env.GCP_REGION }}_nci-research-cluster
           if ! kubectl get deployment django-app &>/dev/null; then
             echo "Deployment not found. Creating..."
             kubectl apply -f k8s/ --validate=false
           fi
-          kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          kubectl set image deployment/django-app django-container=${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
       ########################################
