@@ -8,6 +8,7 @@ on:
 env:
   IMAGE_TAG: commit-${{ github.sha }}
   IMAGE_NAME: django-app
+  ASSIGN_GCP_ROLES: false  # Set to true if you want to reassign GCP roles during CI
 
 jobs:
   deploy:
@@ -45,23 +46,6 @@ jobs:
             --region europe-west1 \
             --project nci-research-project
 
-      - name: Ensure GCP Service Account Has Required Roles
-        run: |
-          gcloud projects add-iam-policy-binding nci-research-project \
-            --member="serviceAccount:github-ci-cd@nci-research-project.iam.gserviceaccount.com" \
-            --role="roles/artifactregistry.writer" --quiet
-
-          gcloud projects add-iam-policy-binding nci-research-project \
-            --member="serviceAccount:github-ci-cd@nci-research-project.iam.gserviceaccount.com" \
-            --role="roles/container.developer" --quiet
-
-          gcloud projects add-iam-policy-binding nci-research-project \
-            --member="serviceAccount:github-ci-cd@nci-research-project.iam.gserviceaccount.com" \
-            --role="roles/container.admin" --quiet
-
-          gcloud projects add-iam-policy-binding nci-research-project \
-            --member="serviceAccount:github-ci-cd@nci-research-project.iam.gserviceaccount.com" \
-            --role="roles/iam.serviceAccountTokenCreator" --quiet
 
       ########################################
       # --------- AZURE SETUP -------------- #
@@ -82,18 +66,18 @@ jobs:
 
       - name: Ensure Azure SP has Contributor Role
         run: |
-          CLIENT_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.clientId')
-          SUBSCRIPTION_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.subscriptionId')
+          CLIENT_ID=$(echo "${{ secrets.AZURE_KEY }}" | jq -r '.clientId')
+          SUBSCRIPTION_ID=$(echo "${{ secrets.AZURE_KEY }}" | jq -r '.subscriptionId')
 
           ASSIGNEE_ID=$(az ad sp show --id "$CLIENT_ID" --query "id" -o tsv)
           echo "Assignee ID: $ASSIGNEE_ID"
 
-          EXISTING_ROLE=$(az role assignment list \
+          ROLE_EXISTS=$(az role assignment list \
             --assignee "$ASSIGNEE_ID" \
             --scope "/subscriptions/$SUBSCRIPTION_ID" \
             --query "[?roleDefinitionName=='Contributor']" -o tsv)
 
-          if [ -z "$EXISTING_ROLE" ]; then
+          if [ -z "$ROLE_EXISTS" ]; then
             echo "Assigning Contributor role to Azure SP..."
             az role assignment create \
               --assignee "$ASSIGNEE_ID" \
@@ -143,6 +127,11 @@ jobs:
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
+      - name: Post-Deploy Check (GKE)
+        run: |
+          kubectl get pods -l app=django-app
+          kubectl get svc django-service
+
       ########################################
       # ------- CLEANUP OLD RS (AKS) ------- #
       ########################################
@@ -168,3 +157,8 @@ jobs:
           fi
           kubectl set image deployment/django-app django-container=nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
+
+      - name: Post-Deploy Check (AKS)
+        run: |
+          kubectl get pods -l app=django-app
+          kubectl get svc django-service
