@@ -64,29 +64,6 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name nciregistryacr
 
-      - name: Ensure Azure SP has Contributor Role
-        run: |
-          CLIENT_ID=$(echo "${{ secrets.AZURE_KEY }}" | jq -r '.clientId')
-          SUBSCRIPTION_ID=$(echo "${{ secrets.AZURE_KEY }}" | jq -r '.subscriptionId')
-
-          ASSIGNEE_ID=$(az ad sp show --id "$CLIENT_ID" --query "id" -o tsv)
-          echo "Assignee ID: $ASSIGNEE_ID"
-
-          ROLE_EXISTS=$(az role assignment list \
-            --assignee "$ASSIGNEE_ID" \
-            --scope "/subscriptions/$SUBSCRIPTION_ID" \
-            --query "[?roleDefinitionName=='Contributor']" -o tsv)
-
-          if [ -z "$ROLE_EXISTS" ]; then
-            echo "Assigning Contributor role to Azure SP..."
-            az role assignment create \
-              --assignee "$ASSIGNEE_ID" \
-              --role Contributor \
-              --scope "/subscriptions/$SUBSCRIPTION_ID"
-          else
-            echo "Azure SP already has Contributor role."
-          fi
-
       ########################################
       # --------- BUILD & PUSH ------------- #
       ########################################
