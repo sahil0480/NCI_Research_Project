@@ -90,6 +90,28 @@ jobs:
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
 
+      - name: Cleanup Failed Pods and Old ReplicaSets in GKE
+        run: |
+          echo "🧹 Cleaning failed pods in GKE..."
+          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
+          if [[ -n "$FAILED_PODS" ]]; then
+            kubectl delete pod $FAILED_PODS --ignore-not-found
+          else
+            echo "No failed pods found."
+          fi
+
+          echo "🧹 Cleaning unused ReplicaSets in GKE..."
+          RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
+          for rs in $RS_TO_DELETE; do
+            echo "Deleting old unused ReplicaSet: $rs"
+            kubectl delete rs $rs
+          done
+
+      - name: 🔍 Print GCP External IP
+        run: |
+          echo "🌐 GCP External IP:"
+          kubectl get svc django-service -o jsonpath="{.status.loadBalancer.ingress[0].ip}"
+
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -116,3 +138,25 @@ jobs:
           sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
+
+      - name: Cleanup Failed Pods and Old ReplicaSets in AKS
+        run: |
+          echo "🧹 Cleaning failed pods in AKS..."
+          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
+          if [[ -n "$FAILED_PODS" ]]; then
+            kubectl delete pod $FAILED_PODS --ignore-not-found
+          else
+            echo "No failed pods found."
+          fi
+
+          echo "🧹 Cleaning unused ReplicaSets in AKS..."
+          RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
+          for rs in $RS_TO_DELETE; do
+            echo "Deleting old unused ReplicaSet: $rs"
+            kubectl delete rs $rs
+          done
+
+      - name: 🔍 Print Azure External IP
+        run: |
+          echo "🌐 Azure External IP:"
+          kubectl get svc django-service -o jsonpath="{.status.loadBalancer.ingress[0].ip}"
