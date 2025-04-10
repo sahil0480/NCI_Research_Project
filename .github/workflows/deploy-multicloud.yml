@@ -28,9 +28,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      ########################################
-      # --------- GCP SETUP ---------------- #
-      ########################################
+      #################################################
+      # ---------------- GCP SETUP ------------------ #
+      #################################################
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
         with:
@@ -60,9 +60,9 @@ jobs:
               --role="roles/$role" --quiet || echo "Role $role already assigned or skipped."
           done
 
-      ########################################
-      # --------- AZURE SETUP -------------- #
-      ########################################
+      #################################################
+      # --------------- AZURE SETUP ----------------- #
+      #################################################
       - name: Login to Azure
         uses: azure/login@v1
         with:
@@ -97,9 +97,9 @@ jobs:
             echo "Contributor role already exists."
           fi
 
-      ########################################
-      # --------- BUILD & PUSH ------------- #
-      ########################################
+      #################################################
+      # ----------- BUILD & PUSH IMAGES ------------- #
+      #################################################
       - name: Build Docker Image
         run: |
           docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
@@ -111,15 +111,9 @@ jobs:
       - name: Push to Azure ACR
         run: docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-      ########################################
-      # ------- DEPLOY TO GKE -------------- #
-      ########################################
-      - name: Ensure GKE Context (Explicit)
-        run: |
-          gcloud container clusters get-credentials nci-research-cluster \
-            --region ${{ env.GCP_REGION }} \
-            --project ${{ env.GCP_PROJECT_ID }}
-
+      #################################################
+      # ---------------- DEPLOY GKE ----------------- #
+      #################################################
       - name: Deploy to GKE
         run: |
           export IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
@@ -131,7 +125,12 @@ jobs:
       - name: Cleanup Failed Pods and Old ReplicaSets in GKE
         run: |
           echo "🧹 Cleaning failed pods in GKE..."
-          kubectl delete pod $(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}") --ignore-not-found
+          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
+          if [[ -n "$FAILED_PODS" ]]; then
+            kubectl delete pod $FAILED_PODS --ignore-not-found
+          else
+            echo "No failed pods to delete."
+          fi
 
           echo "🧹 Cleaning unused ReplicaSets in GKE..."
           RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
@@ -140,15 +139,9 @@ jobs:
             kubectl delete rs $rs
           done
 
-      ########################################
-      # ------- DEPLOY TO AKS -------------- #
-      ########################################
-      - name: Ensure AKS Context (Explicit)
-        uses: azure/aks-set-context@v3
-        with:
-          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
-          cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
-
+      #################################################
+      # ---------------- DEPLOY AKS ----------------- #
+      #################################################
       - name: Deploy to AKS
         run: |
           export IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
@@ -160,7 +153,12 @@ jobs:
       - name: Cleanup Failed Pods and Old ReplicaSets in AKS
         run: |
           echo "🧹 Cleaning failed pods in AKS..."
-          kubectl delete pod $(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}") --ignore-not-found
+          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
+          if [[ -n "$FAILED_PODS" ]]; then
+            kubectl delete pod $FAILED_PODS --ignore-not-found
+          else
+            echo "No failed pods to delete."
+          fi
 
           echo "🧹 Cleaning unused ReplicaSets in AKS..."
           RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
