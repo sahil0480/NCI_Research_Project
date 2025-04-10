@@ -35,12 +35,11 @@ jobs:
         with:
           project_id: nci-research-project
 
-      - name: Configure Docker for GCP Artifact Registry
-        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
+      - name: Install GKE Auth Plugin
+        run: gcloud components install gke-gcloud-auth-plugin --quiet
 
       - name: Authenticate GKE Cluster
         run: |
-          gcloud components install gke-gcloud-auth-plugin --quiet
           gcloud container clusters get-credentials nci-research-cluster \
             --region europe-west1 \
             --project nci-research-project
@@ -77,58 +76,49 @@ jobs:
         run: docker push nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
       ########################################
-      # ------- DEPLOY TO GKE -------------- #
+      # -- CLEANUP + DEPLOY TO GKE --------- #
       ########################################
+      - name: Cleanup old ReplicaSets in GKE
+        run: |
+          kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
+          echo "Cleaning up old ReplicaSets in GKE..."
+          CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
+          for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
+            if [[ "$rs" != "$CURRENT_RS" ]]; then
+              kubectl delete rs $rs
+            fi
+          done
+
       - name: Deploy to GKE
         run: |
-          CONTEXT=$(kubectl config current-context)
-          echo "Using context: $CONTEXT"
-
+          kubectl config use-context gke_nci-research-project_europe-west1_nci-research-cluster
           if ! kubectl get deployment django-app &>/dev/null; then
             echo "Deployment not found in GKE. Applying k8s manifests..."
             kubectl apply -f k8s/ --validate=false
           fi
-
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/nci-research-project/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
 
       ########################################
-      # ------- DEPLOY TO AKS -------------- #
+      # -- CLEANUP + DEPLOY TO AKS --------- #
       ########################################
+      - name: Cleanup old ReplicaSets in AKS
+        run: |
+          kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
+          echo "Cleaning up old ReplicaSets in AKS..."
+          CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
+          for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
+            if [[ "$rs" != "$CURRENT_RS" ]]; then
+              kubectl delete rs $rs
+            fi
+          done
+
       - name: Deploy to AKS
         run: |
-          CONTEXT=$(kubectl config current-context)
-          echo "Using context: $CONTEXT"
-
+          kubectl config use-context aks_nci-azure-rg_nci-aks-cluster
           if ! kubectl get deployment django-app &>/dev/null; then
             echo "Deployment not found in AKS. Applying k8s manifests..."
             kubectl apply -f k8s/ --validate=false
           fi
-
           kubectl set image deployment/django-app django-container=nciregistryacr.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           kubectl rollout status deployment/django-app
-
-      ########################################
-      # ------ CLEANUP OLD REPLICASETS ----- #
-      ########################################
-      - name: Clean up old ReplicaSets in GKE
-        run: |
-          CONTEXT=$(kubectl config current-context)
-          echo "Using context: $CONTEXT"
-          CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
-          for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
-            if [[ "$rs" != "$CURRENT_RS" ]]; then
-              kubectl delete rs $rs
-            fi
-          done
-
-      - name: Clean up old ReplicaSets in AKS
-        run: |
-          CONTEXT=$(kubectl config current-context)
-          echo "Using context: $CONTEXT"
-          CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
-          for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
-            if [[ "$rs" != "$CURRENT_RS" ]]; then
-              kubectl delete rs $rs
-            fi
-          done

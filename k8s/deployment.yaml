@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: django-container
-          image: PLACEHOLDER_IMAGE  # 🔁 Replaced dynamically in GitHub Action
+          image: PLACEHOLDER_IMAGE
           ports:
             - containerPort: 8000
           env:
@@ -36,7 +36,26 @@ spec:
               value: "5432"
           volumeMounts:
             - name: media-storage
-              mountPath: /app/media  # 👈 Maps to MEDIA_ROOT in Django
+              mountPath: /app/media
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
           resources:
             requests:
               cpu: "100m"
@@ -44,6 +63,7 @@ spec:
             limits:
               cpu: "200m"
               memory: "256Mi"
+
       volumes:
         - name: media-storage
           persistentVolumeClaim:
