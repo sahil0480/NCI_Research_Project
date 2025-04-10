@@ -20,143 +20,146 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       id-token: write
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+    - name: Checkout Code
+      uses: actions/checkout@v3
 
-      ########################################
-      # --------- GCP SETUP ---------------- #
-      ########################################
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v1
-        with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+    ########################################
+    # ----------- GCP SETUP -------------- #
+    ########################################
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Set up gcloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
+    - name: Set up gcloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Configure Docker for GCP Artifact Registry
-        run: gcloud auth configure-docker europe-west1-docker.pkg.dev
+    - name: Configure Docker for GCP Artifact Registry
+      run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev
 
-      - name: Authenticate GKE Cluster
-        run: |
-          gcloud components install gke-gcloud-auth-plugin --quiet
-          gcloud container clusters get-credentials nci-research-cluster \
-            --region ${{ env.GCP_REGION }} \
-            --project ${{ env.GCP_PROJECT_ID }}
+    - name: Authenticate GKE Cluster
+      run: |
+        gcloud components install gke-gcloud-auth-plugin --quiet
+        gcloud container clusters get-credentials nci-research-cluster \
+          --region ${{ env.GCP_REGION }} \
+          --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Assign IAM roles to GCP SA (optional)
-        if: env.ASSIGN_GCP_ROLES == 'true'
-        run: |
-          for role in artifactregistry.writer container.admin container.developer iam.serviceAccountTokenCreator; do
-            gcloud projects add-iam-policy-binding ${{ env.GCP_PROJECT_ID }} \
-              --member="serviceAccount:${{ env.GCP_SA_EMAIL }}" \
-              --role="roles/$role" --quiet || echo "Role $role already assigned or skipped."
-          done
+    - name: Assign IAM roles to GCP SA (optional)
+      if: env.ASSIGN_GCP_ROLES == 'true'
+      run: |
+        for role in artifactregistry.writer container.admin container.developer iam.serviceAccountTokenCreator; do
+          gcloud projects add-iam-policy-binding ${{ env.GCP_PROJECT_ID }} \
+            --member="serviceAccount:${{ env.GCP_SA_EMAIL }}" \
+            --role="roles/$role" --quiet || echo "Role $role already assigned or skipped."
+        done
 
-      ########################################
-      # --------- AZURE SETUP -------------- #
-      ########################################
-      - name: Login to Azure
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_KEY }}
+    ########################################
+    # --------- AZURE SETUP -------------- #
+    ########################################
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_KEY }}
 
-      - name: Set AKS Context
-        uses: azure/aks-set-context@v3
-        with:
-          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
-          cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
+    - name: Set AKS Context
+      uses: azure/aks-set-context@v3
+      with:
+        resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
+        cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
-      - name: Azure ACR Login
-        run: az acr login --name ${{ env.AZURE_ACR_NAME }}
+    - name: Azure ACR Login
+      run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      - name: Assign Contributor role to Azure SP (optional)
-        if: env.ASSIGN_AZURE_ROLES == 'true'
-        run: |
-          CLIENT_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.clientId')
-          SUB_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.subscriptionId')
-          ASSIGNEE_ID=$(az ad sp show --id "$CLIENT_ID" --query "id" -o tsv)
-          ROLE_EXISTS=$(az role assignment list \
+    - name: Assign Contributor role to Azure SP (optional)
+      if: env.ASSIGN_AZURE_ROLES == 'true'
+      run: |
+        CLIENT_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.clientId')
+        SUB_ID=$(echo '${{ secrets.AZURE_KEY }}' | jq -r '.subscriptionId')
+        ASSIGNEE_ID=$(az ad sp show --id "$CLIENT_ID" --query "id" -o tsv)
+        ROLE_EXISTS=$(az role assignment list \
+          --assignee "$ASSIGNEE_ID" \
+          --scope "/subscriptions/$SUB_ID" \
+          --query "[?roleDefinitionName=='Contributor']" -o tsv)
+        if [[ -z "$ROLE_EXISTS" ]]; then
+          echo "Assigning Contributor role..."
+          az role assignment create \
             --assignee "$ASSIGNEE_ID" \
-            --scope "/subscriptions/$SUB_ID" \
-            --query "[?roleDefinitionName=='Contributor']" -o tsv)
-          if [[ -z "$ROLE_EXISTS" ]]; then
-            echo "Assigning Contributor role..."
-            az role assignment create \
-              --assignee "$ASSIGNEE_ID" \
-              --role Contributor \
-              --scope "/subscriptions/$SUB_ID"
-          else
-            echo "Contributor role already exists."
+            --role Contributor \
+            --scope "/subscriptions/$SUB_ID"
+        else
+          echo "Contributor role already exists."
+        fi
+
+    ########################################
+    # -------- BUILD & PUSH IMAGE -------- #
+    ########################################
+    - name: Build Docker Image
+      run: |
+        docker build -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+                     -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+
+    - name: Push to GCP Artifact Registry
+      run: docker push ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+    - name: Push to Azure ACR
+      run: docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+    ########################################
+    # -------- CLEANUP OLD RS (GKE) ------ #
+    ########################################
+    - name: Cleanup ReplicaSets in GKE
+      run: |
+        kubectl config use-context gke_${{ env.GCP_PROJECT_ID }}_${{ env.GCP_REGION }}_nci-research-cluster
+        CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
+        for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
+          if [[ "$rs" != "$CURRENT_RS" ]]; then
+            kubectl delete rs $rs
           fi
+        done
 
-      ########################################
-      # --------- BUILD & PUSH ------------- #
-      ########################################
-      - name: Build Docker Image
-        run: |
-          docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
-                       -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+    ########################################
+    # -------- DEPLOY TO GKE ------------- #
+    ########################################
+    - name: Deploy to GKE
+      run: |
+        kubectl config use-context gke_${{ env.GCP_PROJECT_ID }}_${{ env.GCP_REGION }}_nci-research-cluster
+        if ! kubectl get deployment django-app &>/dev/null; then
+          echo "Deployment not found. Creating..."
+          kubectl apply -f k8s/ --validate=false
+        fi
+        kubectl set image deployment/django-app django-container=${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        kubectl rollout status deployment/django-app
 
-      - name: Push to GCP Artifact Registry
-        run: docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-      - name: Push to Azure ACR
-        run: docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-      ########################################
-      # ------- CLEANUP OLD RS (GKE) ------- #
-      ########################################
-      - name: Cleanup ReplicaSets in GKE
-        run: |
-          CONTEXT=$(kubectl config current-context)
-          echo "Using GKE context: $CONTEXT"
-          CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
-          for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
-            if [[ "$rs" != "$CURRENT_RS" ]]; then
-              kubectl delete rs $rs
-            fi
-          done
-
-      - name: Deploy to GKE
-        run: |
-          CONTEXT=$(kubectl config current-context)
-          echo "Using GKE context: $CONTEXT"
-          if ! kubectl get deployment django-app &>/dev/null; then
-            echo "Deployment not found in GKE. Creating..."
-            kubectl apply -f k8s/ --validate=false
+    ########################################
+    # -------- CLEANUP OLD RS (AKS) ------ #
+    ########################################
+    - name: Cleanup ReplicaSets in AKS
+      run: |
+        kubectl config use-context aks_${{ env.AZURE_RESOURCE_GROUP }}_${{ env.AZURE_AKS_CLUSTER }}
+        CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
+        for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
+          if [[ "$rs" != "$CURRENT_RS" ]]; then
+            kubectl delete rs $rs
           fi
-          kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          kubectl rollout status deployment/django-app
+        done
 
-      ########################################
-      # ------- CLEANUP OLD RS (AKS) ------- #
-      ########################################
-      - name: Cleanup ReplicaSets in AKS
-        run: |
-          CONTEXT=$(kubectl config current-context)
-          echo "Using AKS context: $CONTEXT"
-          CURRENT_RS=$(kubectl get rs -o=jsonpath='{.items[?(@.status.replicas==2)].metadata.name}')
-          for rs in $(kubectl get rs --no-headers -o custom-columns=":metadata.name"); do
-            if [[ "$rs" != "$CURRENT_RS" ]]; then
-              kubectl delete rs $rs
-            fi
-          done
-
-      - name: Deploy to AKS
-        run: |
-          CONTEXT=$(kubectl config current-context)
-          echo "Using AKS context: $CONTEXT"
-          if ! kubectl get deployment django-app &>/dev/null; then
-            echo "Deployment not found in AKS. Creating..."
-            kubectl apply -f k8s/ --validate=false
-          fi
-          kubectl set image deployment/django-app django-container=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          kubectl rollout status deployment/django-app
+    ########################################
+    # -------- DEPLOY TO AKS ------------- #
+    ########################################
+    - name: Deploy to AKS
+      run: |
+        kubectl config use-context aks_${{ env.AZURE_RESOURCE_GROUP }}_${{ env.AZURE_AKS_CLUSTER }}
+        if ! kubectl get deployment django-app &>/dev/null; then
+          echo "Deployment not found. Creating..."
+          kubectl apply -f k8s/ --validate=false
+        fi
+        kubectl set image deployment/django-app django-container=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        kubectl rollout status deployment/django-app
