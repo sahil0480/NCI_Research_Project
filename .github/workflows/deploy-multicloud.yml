@@ -12,7 +12,7 @@ env:
   ASSIGN_AZURE_ROLES: true
   GCP_SA_EMAIL: github-ci-cd@nci-research-project.iam.gserviceaccount.com
   GCP_PROJECT_ID: nci-research-project
-  GCP_ZONE: europe-west1-b
+  GCP_REGION: europe-west1
   AZURE_RESOURCE_GROUP: nci-azure-rg
   AZURE_AKS_CLUSTER: nci-aks-cluster
   AZURE_ACR_NAME: nciregistryacr
@@ -49,7 +49,7 @@ jobs:
         run: |
           gcloud components install gke-gcloud-auth-plugin --quiet
           gcloud container clusters get-credentials nci-research-cluster \
-            --zone ${{ env.GCP_ZONE }} \
+            --region ${{ env.GCP_REGION }} \
             --project ${{ env.GCP_PROJECT_ID }}
 
       - name: Assign IAM roles to GCP SA (optional)
