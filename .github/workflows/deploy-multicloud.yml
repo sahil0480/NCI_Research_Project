@@ -8,8 +8,6 @@ on:
 env:
   IMAGE_TAG: commit-${{ github.sha }}
   IMAGE_NAME: django-app
-  ASSIGN_GCP_ROLES: true
-  ASSIGN_AZURE_ROLES: true
   GCP_SA_EMAIL: github-ci-cd@nci-research-project.iam.gserviceaccount.com
   GCP_PROJECT_ID: nci-research-project
   GCP_REGION: europe-west1
@@ -22,18 +20,19 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.set-tag.outputs.tag }}
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Set image tag
+      - name: Set Image Tag
         id: set-tag
         run: echo "tag=commit-${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GCP Artifact Registry
+      - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
@@ -41,7 +40,7 @@ jobs:
       - name: Configure Docker for GCP
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
-      - name: Login to Azure ACR
+      - name: Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
@@ -59,6 +58,7 @@ jobs:
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -73,13 +73,19 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Get GKE credentials
-        run: gcloud container clusters get-credentials nci-research-cluster --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
+      - name: Install GKE Auth Plugin
+        run: gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials nci-research-cluster \
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.GCP_PROJECT_ID }}
 
       - name: Deploy to GKE
         run: |
           IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          echo "Using GKE image: $IMAGE"
+          echo "🚀 Deploying to GKE using image: $IMAGE"
           sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
@@ -87,6 +93,7 @@ jobs:
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -96,7 +103,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_KEY }}
 
-      - name: Set AKS context
+      - name: Set AKS Context
         uses: azure/aks-set-context@v3
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
@@ -105,7 +112,7 @@ jobs:
       - name: Deploy to AKS
         run: |
           IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          echo "Using AKS image: $IMAGE"
+          echo "🚀 Deploying to AKS using image: $IMAGE"
           sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
