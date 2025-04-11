@@ -14,6 +14,8 @@ env:
   AZURE_RESOURCE_GROUP: nci-azure-rg
   AZURE_AKS_CLUSTER: nci-aks-cluster
   AZURE_ACR_NAME: nciregistryacr
+  GCP_LOG_BUCKET: nci-deployment-logs
+  AZURE_LOG_CONTAINER: deployment-logs
 
 jobs:
   build-and-push:
@@ -58,6 +60,8 @@ jobs:
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
+    outputs:
+      gcp_status: ${{ steps.deploy.outcome }}
 
     steps:
       - name: Checkout Code
@@ -83,38 +87,26 @@ jobs:
             --project ${{ env.GCP_PROJECT_ID }}
 
       - name: Deploy to GKE
+        id: deploy
         run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          echo "🚀 Deploying to GKE using image: $IMAGE"
           sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
-
-      - name: Cleanup Failed Pods and Old ReplicaSets in GKE
-        run: |
-          echo "🧹 Cleaning failed pods in GKE..."
-          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
-          if [[ -n "$FAILED_PODS" ]]; then
-            kubectl delete pod $FAILED_PODS --ignore-not-found
-          else
-            echo "No failed pods found."
-          fi
-
-          echo "🧹 Cleaning unused ReplicaSets in GKE..."
-          RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
-          for rs in $RS_TO_DELETE; do
-            echo "Deleting old unused ReplicaSet: $rs"
-            kubectl delete rs $rs
-          done
-
-      - name: 🔍 Print GCP External IP
-        run: |
-          echo "🌐 GCP External IP:"
-          kubectl get svc django-service -o jsonpath="{.status.loadBalancer.ingress[0].ip}"
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          DURATION=$(($(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s)))
+          FILE_NAME="deploy-log-gcp-${{ github.run_id }}-${{ github.run_number }}.csv"
+          echo "cloud,start_time,end_time,duration_seconds,status" > $FILE_NAME
+          echo "GCP,$START_TIME,$END_TIME,$DURATION,success" >> $FILE_NAME
+          echo "📦 Uploading log to GCS..."
+          gsutil cp $FILE_NAME gs://${{ env.GCP_LOG_BUCKET }}/$FILE_NAME
 
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
+    outputs:
+      azure_status: ${{ steps.deploy.outcome }}
 
     steps:
       - name: Checkout Code
@@ -132,31 +124,23 @@ jobs:
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
       - name: Deploy to AKS
+        id: deploy
         run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          echo "🚀 Deploying to AKS using image: $IMAGE"
           sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
-
-      - name: Cleanup Failed Pods and Old ReplicaSets in AKS
-        run: |
-          echo "🧹 Cleaning failed pods in AKS..."
-          FAILED_PODS=$(kubectl get pods --field-selector=status.phase=Failed -o jsonpath="{.items[*].metadata.name}")
-          if [[ -n "$FAILED_PODS" ]]; then
-            kubectl delete pod $FAILED_PODS --ignore-not-found
-          else
-            echo "No failed pods found."
-          fi
-
-          echo "🧹 Cleaning unused ReplicaSets in AKS..."
-          RS_TO_DELETE=$(kubectl get rs -l app=django-app -o json | jq -r '.items[] | select(.status.replicas==0 and .status.readyReplicas==0) | .metadata.name')
-          for rs in $RS_TO_DELETE; do
-            echo "Deleting old unused ReplicaSet: $rs"
-            kubectl delete rs $rs
-          done
-
-      - name: 🔍 Print Azure External IP
-        run: |
-          echo "🌐 Azure External IP:"
-          kubectl get svc django-service -o jsonpath="{.status.loadBalancer.ingress[0].ip}"
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          DURATION=$(($(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s)))
+          FILE_NAME="deploy-log-azure-${{ github.run_id }}-${{ github.run_number }}.csv"
+          echo "cloud,start_time,end_time,duration_seconds,status" > $FILE_NAME
+          echo "Azure,$START_TIME,$END_TIME,$DURATION,success" >> $FILE_NAME
+          echo "📦 Uploading log to Azure Blob..."
+          az storage blob upload \
+            --account-name ${{ env.AZURE_ACR_NAME }} \
+            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
+            --name $FILE_NAME \
+            --file $FILE_NAME \
+            --auth-mode key \
+            --account-key ${{ secrets.AZURE_STORAGE_KEY }}
