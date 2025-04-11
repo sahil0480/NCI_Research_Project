@@ -60,8 +60,6 @@ jobs:
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
-    outputs:
-      gcp_status: ${{ steps.deploy.outcome }}
 
     steps:
       - name: Checkout Code
@@ -91,7 +89,7 @@ jobs:
         run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
+          sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -105,8 +103,6 @@ jobs:
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
-    outputs:
-      azure_status: ${{ steps.deploy.outcome }}
 
     steps:
       - name: Checkout Code
@@ -128,7 +124,7 @@ jobs:
         run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          sed "s|PLACEHOLDER_IMAGE|$IMAGE|" k8s/deployment.yaml | kubectl apply -f -
+          sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-rwx|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

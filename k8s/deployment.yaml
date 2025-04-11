@@ -38,7 +38,6 @@ spec:
             - name: media-storage
               mountPath: /app/media
 
-          # ⏱️ More forgiving readiness probe (helps avoid false "unready" during startup)
           readinessProbe:
             httpGet:
               path: /
@@ -48,7 +47,6 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 10
 
-          # 💓 Health check for liveliness with more delay tolerance
           livenessProbe:
             httpGet:
               path: /
@@ -69,4 +67,4 @@ spec:
       volumes:
         - name: media-storage
           persistentVolumeClaim:
-            claimName: django-media-pvc
+            claimName: {{PVC_NAME}}  # Injected by GitHub Actions per cloud
