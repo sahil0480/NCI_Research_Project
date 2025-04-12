@@ -14,6 +14,7 @@ env:
   AZURE_RESOURCE_GROUP: nci-azure-rg
   AZURE_AKS_CLUSTER: nci-aks-cluster
   AZURE_ACR_NAME: nciregistryacr
+  AZURE_STORAGE_ACCOUNT: nciresearchstorage
   GCP_LOG_BUCKET: nci-deployment-logs
   AZURE_LOG_CONTAINER: deployment-logs
 
@@ -134,7 +135,7 @@ jobs:
           echo "Azure,$START_TIME,$END_TIME,$DURATION,success" >> $FILE_NAME
           echo "📦 Uploading log to Azure Blob..."
           az storage blob upload \
-            --account-name ${{ env.AZURE_ACR_NAME }} \
+            --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
             --container-name ${{ env.AZURE_LOG_CONTAINER }} \
             --name $FILE_NAME \
             --file $FILE_NAME \
