@@ -36,7 +36,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # GCP Auth
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
@@ -45,7 +44,6 @@ jobs:
       - name: Configure Docker for GCP
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
-      # Azure Auth
       - name: Login to Azure
         uses: azure/login@v1
         with:
@@ -54,7 +52,6 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      # AWS Auth - Parse credentials
       - name: Parse AWS credentials
         id: parse_aws_creds
         run: |
@@ -96,10 +93,10 @@ jobs:
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Install GKE auth plugin
+      - name: Install GKE Auth Plugin
         run: |
-          sudo apt-get update
-          sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin -y
+          curl -sSL https://dl.google.com/cloudsdk/channels/rapid/components/gke-gcloud-auth-plugin-linux-x86_64.tar.gz | tar -xz
+          sudo mv gke-gcloud-auth-plugin /usr/local/bin/
           echo 'export USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
 
       - name: Get GKE Credentials
@@ -107,6 +104,10 @@ jobs:
           gcloud container clusters get-credentials nci-research-cluster \
             --region ${{ env.GCP_REGION }} \
             --project ${{ env.GCP_PROJECT_ID }}
+
+      - name: Apply PVCs for GCP
+        run: |
+          kubectl apply -f k8s/media-pvc.yaml
 
       - name: Deploy to GKE
         run: |
@@ -119,7 +120,7 @@ jobs:
           EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          echo "GCP,$START_TIME,$END_TIME,$(( $(date -d \"$END_TIME\" +%s) - $(date -d \"$START_TIME\" +%s) )),success,$EXTERNAL_IP" >> log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
 
   deploy-azure:
@@ -141,6 +142,11 @@ jobs:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
+      - name: Apply PVCs for Azure
+        run: |
+          kubectl apply -f k8s/azurefile-csi-rwx-sc.yaml
+          kubectl apply -f k8s/azure-django-media-pvc.yaml
+
       - name: Deploy to AKS
         run: |
           SERVICE_NAME=django-service
@@ -152,7 +158,7 @@ jobs:
           EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          echo "Azure,$START_TIME,$END_TIME,$(( $(date -d \"$END_TIME\" +%s) - $(date -d \"$START_TIME\" +%s) )),success,$EXTERNAL_IP" >> log.csv
           az storage blob upload \
             --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
             --container-name ${{ env.AZURE_LOG_CONTAINER }} \
@@ -186,6 +192,12 @@ jobs:
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
 
+      - name: Apply PVCs for AWS
+        run: |
+          kubectl apply -f k8s/efs-storageclass.yaml
+          kubectl apply -f k8s/pvc-efs.yaml
+          kubectl apply -f k8s/postgres-pvc.yaml
+
       - name: Deploy to EKS
         run: |
           SERVICE_NAME=django-service
@@ -197,5 +209,5 @@ jobs:
           EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          echo "AWS,$START_TIME,$END_TIME,$(( $(date -d \"$END_TIME\" +%s) - $(date -d \"$START_TIME\" +%s) )),success,$EXTERNAL_IP" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
