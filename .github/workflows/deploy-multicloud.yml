@@ -1,4 +1,4 @@
-name: Multi-Cloud Parallel Deploy to GKE, AKS and EKS
+name: Multi-Cloud Parallel Deploy to GKE, AKS, and EKS
 
 on:
   push:
@@ -83,17 +83,18 @@ jobs:
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Install GKE Auth Plugin
-        run: |
-          echo 'export USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
+      - name: Use GKE GCloud Auth Plugin
+        run: echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
       - name: Get GKE Credentials
         run: |
@@ -101,28 +102,32 @@ jobs:
             --region ${{ env.GCP_REGION }} \
             --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Clean up stuck PVCs/Pods
+      - name: Cleanup Pending PVCs/Pods
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
-          kubectl delete pvc --field-selector=status.phase!=Bound --ignore-not-found
+          for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
+            kubectl delete pvc "$pvc" --ignore-not-found
+          done
 
-      - name: Deploy to GKE
+      - name: Apply GCP Manifests
         run: |
-          kubectl apply -f k8s/gcp/postgres-pvc.yaml
-          kubectl apply -f k8s/gcp/postgres.yaml
-          kubectl apply -f k8s/gcp/django-media-pvc.yaml
-          IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          sed "s|PLACEHOLDER_IMAGE|$IMAGE|; s|{{PVC_NAME}}|django-media-pvc|" k8s/gcp/deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/gcp/service.yaml
+          kubectl apply -f k8s/gcp/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "🔗 GCP External IP: $EXTERNAL_IP"
+          echo "GCP External IP: $EXTERNAL_IP"
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
+          echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
 
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Login to Azure
         uses: azure/login@v1
@@ -135,28 +140,38 @@ jobs:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
-      - name: Clean up stuck PVCs/Pods
+      - name: Cleanup Pending PVCs/Pods
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
-          kubectl delete pvc --field-selector=status.phase!=Bound --ignore-not-found
+          for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
+            kubectl delete pvc "$pvc" --ignore-not-found
+          done
 
-      - name: Deploy to AKS
+      - name: Apply Azure Manifests
         run: |
-          kubectl apply -f k8s/azure/postgres-pvc.yaml
-          kubectl apply -f k8s/azure/postgres.yaml
-          kubectl apply -f k8s/azure/django-media-pvc.yaml
-          IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          sed "s|PLACEHOLDER_IMAGE|$IMAGE|; s|{{PVC_NAME}}|django-media-pvc-rwx|" k8s/azure/deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/azure/service.yaml
+          kubectl apply -f k8s/azure/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "🔗 Azure External IP: $EXTERNAL_IP"
+          echo "Azure External IP: $EXTERNAL_IP"
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
+          echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          az storage blob upload \
+            --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
+            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
+            --name deploy-azure-${{ github.run_id }}.csv \
+            --file log.csv \
+            --auth-mode key \
+            --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Parse AWS credentials
         id: parse_aws_creds
@@ -175,19 +190,21 @@ jobs:
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
 
-      - name: Clean up stuck PVCs/Pods
+      - name: Cleanup Pending PVCs/Pods
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
-          kubectl delete pvc --field-selector=status.phase!=Bound --ignore-not-found
+          for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
+            kubectl delete pvc "$pvc" --ignore-not-found
+          done
 
-      - name: Deploy to EKS
+      - name: Apply AWS Manifests
         run: |
-          kubectl apply -f k8s/aws/postgres-pvc.yaml
-          kubectl apply -f k8s/aws/postgres.yaml
-          kubectl apply -f k8s/aws/django-media-pvc.yaml
-          IMAGE=${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          sed "s|PLACEHOLDER_IMAGE|$IMAGE|; s|{{PVC_NAME}}|django-media-pvc-efs|" k8s/aws/deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/aws/service.yaml
+          kubectl apply -f k8s/aws/
           kubectl rollout status deployment django-app
-          EXTERNAL_HOST=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "🔗 AWS External Hostname: $EXTERNAL_HOST"
+          EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "AWS External IP: $EXTERNAL_IP"
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
+          echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
