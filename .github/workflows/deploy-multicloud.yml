@@ -1,12 +1,13 @@
-name: Multi-Cloud Parallel Deploy to GKE, AKS, and EKS
+name: Multi-Cloud Parallel Deploy to GKE, AKS and EKS
 
 on:
   push:
-    branches: [master]
+    branches:
+      - master
 
 env:
-  IMAGE_NAME: django-app
   IMAGE_TAG: commit-${{ github.sha }}
+  IMAGE_NAME: django-app
   GCP_PROJECT_ID: nci-research-project
   GCP_REGION: europe-west1
   AZURE_RESOURCE_GROUP: nci-azure-rg
@@ -25,14 +26,14 @@ jobs:
       image_tag: ${{ steps.set-tag.outputs.tag }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Set image tag
+      - name: Set Image Tag
         id: set-tag
         run: echo "tag=commit-${{ github.sha }}" >> $GITHUB_OUTPUT
 
-      - name: Setup Docker Buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Authenticate to GCP
@@ -40,7 +41,7 @@ jobs:
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Docker auth for GCP
+      - name: Configure Docker for GCP
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
       - name: Login to Azure
@@ -51,8 +52,8 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      - name: Parse AWS creds
-        id: parse_aws
+      - name: Parse AWS credentials
+        id: parse_aws_creds
         run: |
           echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_OUTPUT
           echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_OUTPUT
@@ -62,118 +63,103 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ steps.parse_aws.outputs.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ steps.parse_aws.outputs.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ steps.parse_aws_creds.outputs.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ steps.parse_aws_creds.outputs.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Login to ECR
+      - name: Login to Amazon ECR
         run: |
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-          docker login --username AWS --password-stdin \
-          ${{ steps.parse_aws.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          docker login --username AWS --password-stdin ${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-      - name: Build & Push Docker Images
+      - name: Build and Push Docker Images
         run: |
-          docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
-                       -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
-                       -t ${{ steps.parse_aws.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
-          docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          docker push ${{ steps.parse_aws.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
+                       -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
+                       -t ${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} .
+          docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+          docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+          docker push ${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
 
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Auth to GCP
+      - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: GKE auth plugin
+      - name: Install GKE Auth Plugin
         run: |
           echo 'export USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
 
-      - name: Get GKE credentials
+      - name: Get GKE Credentials
         run: |
           gcloud container clusters get-credentials nci-research-cluster \
-            --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Cleanup previous PVC/Pods
+      - name: Clean up stuck PVCs/Pods
         run: |
-          kubectl delete pod --all --ignore-not-found
-          kubectl delete pvc django-media-pvc --ignore-not-found
-          kubectl apply -f k8s/gcp-django-media-pvc.yaml
+          kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
+          kubectl delete pvc --field-selector=status.phase!=Bound --ignore-not-found
 
       - name: Deploy to GKE
         run: |
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          kubectl apply -f k8s/gcp/postgres-pvc.yaml
+          kubectl apply -f k8s/gcp/postgres.yaml
+          kubectl apply -f k8s/gcp/django-media-pvc.yaml
           IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc|" k8s/deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/service.yaml
+          sed "s|PLACEHOLDER_IMAGE|$IMAGE|; s|{{PVC_NAME}}|django-media-pvc|" k8s/gcp/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/gcp/service.yaml
           kubectl rollout status deployment django-app
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          DURATION=$(( $(date -d $END_TIME +%s) - $(date -d $START_TIME +%s) ))
-          IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "GCP,$START_TIME,$END_TIME,$DURATION,success,$IP" >> log.csv
-          gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
+          EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "🔗 GCP External IP: $EXTERNAL_IP"
 
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
 
-      - name: Set AKS context
+      - name: Set AKS Context
         uses: azure/aks-set-context@v3
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
-      - name: Cleanup and setup PVC
+      - name: Clean up stuck PVCs/Pods
         run: |
-          kubectl delete pod --all --ignore-not-found
-          kubectl delete pvc django-media-pvc-rwx --ignore-not-found
-          kubectl apply -f k8s/azure-django-media-pvc.yaml
+          kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
+          kubectl delete pvc --field-selector=status.phase!=Bound --ignore-not-found
 
       - name: Deploy to AKS
         run: |
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          kubectl apply -f k8s/azure/postgres-pvc.yaml
+          kubectl apply -f k8s/azure/postgres.yaml
+          kubectl apply -f k8s/azure/django-media-pvc.yaml
           IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-rwx|" k8s/deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/service.yaml
+          sed "s|PLACEHOLDER_IMAGE|$IMAGE|; s|{{PVC_NAME}}|django-media-pvc-rwx|" k8s/azure/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/azure/service.yaml
           kubectl rollout status deployment django-app
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          DURATION=$(( $(date -d $END_TIME +%s) - $(date -d $START_TIME +%s) ))
-          IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "Azure,$START_TIME,$END_TIME,$DURATION,success,$IP" >> log.csv
-          az storage blob upload \
-            --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
-            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
-            --name deploy-azure-${{ github.run_id }}.csv \
-            --file log.csv \
-            --auth-mode key \
-            --account-key ${{ secrets.AZURE_STORAGE_KEY }}
+          EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "🔗 Azure External IP: $EXTERNAL_IP"
 
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Parse AWS credentials
-        id: parse_aws
+        id: parse_aws_creds
         run: |
           echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_OUTPUT
           echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_OUTPUT
@@ -183,28 +169,25 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ steps.parse_aws.outputs.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ steps.parse_aws.outputs.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ steps.parse_aws_creds.outputs.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ steps.parse_aws_creds.outputs.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Set EKS kubeconfig
+      - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
 
-      - name: Cleanup and apply PVC
+      - name: Clean up stuck PVCs/Pods
         run: |
-          kubectl delete pod --all --ignore-not-found
-          kubectl delete pvc django-media-pvc-efs --ignore-not-found
-          kubectl apply -f k8s/aws-django-media-pvc.yaml
+          kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
+          kubectl delete pvc --field-selector=status.phase!=Bound --ignore-not-found
 
       - name: Deploy to EKS
         run: |
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          IMAGE=${{ steps.parse_aws.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-          sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-efs|" k8s/deployment.yaml | kubectl apply -f -
-          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/aws/postgres-pvc.yaml
+          kubectl apply -f k8s/aws/postgres.yaml
+          kubectl apply -f k8s/aws/django-media-pvc.yaml
+          IMAGE=${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          sed "s|PLACEHOLDER_IMAGE|$IMAGE|; s|{{PVC_NAME}}|django-media-pvc-efs|" k8s/aws/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/aws/service.yaml
           kubectl rollout status deployment django-app
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          DURATION=$(( $(date -d $END_TIME +%s) - $(date -d $START_TIME +%s) ))
-          HOST=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "AWS,$START_TIME,$END_TIME,$DURATION,success,$HOST" >> log.csv
-          aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
+          EXTERNAL_HOST=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "🔗 AWS External Hostname: $EXTERNAL_HOST"
