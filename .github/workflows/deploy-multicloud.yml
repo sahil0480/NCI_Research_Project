@@ -96,6 +96,11 @@ jobs:
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
+      - name: Install GKE auth plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+          echo 'export USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
+
       - name: Get GKE Credentials
         run: |
           gcloud container clusters get-credentials nci-research-cluster \
@@ -109,9 +114,10 @@ jobs:
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
+          EXTERNAL_IP=$(kubectl get svc django-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
-          echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success" >> log.csv
+          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
+          echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
 
   deploy-azure:
@@ -140,9 +146,10 @@ jobs:
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-rwx|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
+          EXTERNAL_IP=$(kubectl get svc django-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
-          echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success" >> log.csv
+          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
+          echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           az storage blob upload \
             --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
             --container-name ${{ env.AZURE_LOG_CONTAINER }} \
@@ -183,7 +190,8 @@ jobs:
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-efs|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
+          EXTERNAL_IP=$(kubectl get svc django-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
-          echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success" >> log.csv
+          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
+          echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
