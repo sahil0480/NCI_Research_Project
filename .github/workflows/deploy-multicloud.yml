@@ -54,12 +54,19 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      # AWS Auth
+      # AWS Auth - Parse credentials
+      - name: Parse AWS credentials
+        id: parse_aws_creds
+        run: |
+          echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_OUTPUT
+          echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_OUTPUT
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
-          credentials-json: ${{ secrets.AWS_KEY }}
+          aws-access-key-id: ${{ steps.parse_aws_creds.outputs.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ steps.parse_aws_creds.outputs.AWS_SECRET_ACCESS_KEY }}
 
       - name: Login to Amazon ECR
         run: |
@@ -151,11 +158,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Parse AWS credentials
+        id: parse_aws_creds
+        run: |
+          echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_OUTPUT
+          echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_OUTPUT
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          ws-region: ${{ env.AWS_REGION }}
-          credentials-json: ${{ secrets.AWS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ steps.parse_aws_creds.outputs.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ steps.parse_aws_creds.outputs.AWS_SECRET_ACCESS_KEY }}
 
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
@@ -171,6 +185,3 @@ jobs:
           echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
           echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
-
-
-          
