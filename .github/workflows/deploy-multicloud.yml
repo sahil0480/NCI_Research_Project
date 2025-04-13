@@ -17,7 +17,7 @@ env:
   GCP_LOG_BUCKET: nci-deployment-logs
   AZURE_LOG_CONTAINER: deployment-logs
   AWS_REGION: eu-west-1
-  AWS_LOG_BUCKET: nci-multicloud-logs-bucket  # Ensure this is your actual S3 bucket name
+  AWS_LOG_BUCKET: nci-multicloud-logs-bucket
 
 jobs:
   build-and-push:
@@ -54,13 +54,12 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      # AWS ECR Login
+      # AWS Auth
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+          credentials-json: ${{ secrets.AWS_KEY }}
 
       - name: Login to Amazon ECR
         run: |
@@ -79,6 +78,7 @@ jobs:
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -88,11 +88,6 @@ jobs:
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-
       - name: Get GKE Credentials
         run: |
           gcloud container clusters get-credentials nci-research-cluster \
@@ -101,14 +96,20 @@ jobs:
 
       - name: Deploy to GKE
         run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
+          echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success" >> log.csv
+          gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
 
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -126,14 +127,26 @@ jobs:
 
       - name: Deploy to AKS
         run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-rwx|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
+          echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success" >> log.csv
+          az storage blob upload \
+            --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
+            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
+            --name deploy-azure-${{ github.run_id }}.csv \
+            --file log.csv \
+            --auth-mode key \
+            --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -141,9 +154,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          ws-region: ${{ env.AWS_REGION }}
+          credentials-json: ${{ secrets.AWS_KEY }}
 
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
@@ -156,9 +168,6 @@ jobs:
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          DURATION=$(($(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s)))
-          FILE_NAME="deploy-log-aws-${{ github.run_id }}-${{ github.run_number }}.csv"
-          echo "cloud,start_time,end_time,duration_seconds,status" > $FILE_NAME
-          echo "AWS,$START_TIME,$END_TIME,$DURATION,success" >> $FILE_NAME
-          echo "📦 Uploading log to S3..."
-          aws s3 cp $FILE_NAME s3://${{ env.AWS_LOG_BUCKET }}/$FILE_NAME
+          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
+          echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success" >> log.csv
+          aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
