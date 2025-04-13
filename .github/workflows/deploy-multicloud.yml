@@ -8,7 +8,6 @@ on:
 env:
   IMAGE_TAG: commit-${{ github.sha }}
   IMAGE_NAME: django-app
-  GCP_SA_EMAIL: github-ci-cd@nci-research-project.iam.gserviceaccount.com
   GCP_PROJECT_ID: nci-research-project
   GCP_REGION: europe-west1
   AZURE_RESOURCE_GROUP: nci-azure-rg
@@ -18,6 +17,7 @@ env:
   GCP_LOG_BUCKET: nci-deployment-logs
   AZURE_LOG_CONTAINER: deployment-logs
   AWS_REGION: eu-west-1
+  AWS_LOG_BUCKET: nci-multicloud-logs-bucket  # Ensure this is your actual S3 bucket name
 
 jobs:
   build-and-push:
@@ -79,7 +79,6 @@ jobs:
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -93,9 +92,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-
-      - name: Install GKE Auth Plugin
-        run: gcloud components install gke-gcloud-auth-plugin --quiet
 
       - name: Get GKE Credentials
         run: |
@@ -113,7 +109,6 @@ jobs:
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -139,7 +134,6 @@ jobs:
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -156,7 +150,15 @@ jobs:
 
       - name: Deploy to EKS
         run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-efs|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
+          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          DURATION=$(($(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s)))
+          FILE_NAME="deploy-log-aws-${{ github.run_id }}-${{ github.run_number }}.csv"
+          echo "cloud,start_time,end_time,duration_seconds,status" > $FILE_NAME
+          echo "AWS,$START_TIME,$END_TIME,$DURATION,success" >> $FILE_NAME
+          echo "📦 Uploading log to S3..."
+          aws s3 cp $FILE_NAME s3://${{ env.AWS_LOG_BUCKET }}/$FILE_NAME
