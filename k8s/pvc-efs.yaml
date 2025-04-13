@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: django-media-pvc-rwx
+  name: django-media-pvc-efs
 spec:
   accessModes:
     - ReadWriteMany

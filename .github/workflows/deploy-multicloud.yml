@@ -98,7 +98,8 @@ jobs:
 
       - name: Install GKE auth plugin
         run: |
-          gcloud components install gke-gcloud-auth-plugin --quiet
+          sudo apt-get update
+          sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin -y
           echo 'export USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
 
       - name: Get GKE Credentials
@@ -109,12 +110,13 @@ jobs:
 
       - name: Deploy to GKE
         run: |
+          SERVICE_NAME=django-service
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
-          EXTERNAL_IP=$(kubectl get svc django-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
@@ -141,12 +143,13 @@ jobs:
 
       - name: Deploy to AKS
         run: |
+          SERVICE_NAME=django-service
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-rwx|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
-          EXTERNAL_IP=$(kubectl get svc django-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
@@ -185,12 +188,13 @@ jobs:
 
       - name: Deploy to EKS
         run: |
+          SERVICE_NAME=django-service
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IMAGE=${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           sed -e "s|PLACEHOLDER_IMAGE|$IMAGE|" -e "s|{{PVC_NAME}}|django-media-pvc-efs|" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml
           kubectl rollout status deployment django-app
-          EXTERNAL_IP=$(kubectl get svc django-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
