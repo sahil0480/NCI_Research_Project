@@ -82,32 +82,23 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Auth GCP + Setup
-        uses: google-github-actions/auth@v1
+      - uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Setup GKE + Auth Plugin
-        uses: google-github-actions/setup-gcloud@v1
+      - uses: google-github-actions/setup-gcloud@v1
         with:
           install_components: gke-gcloud-auth-plugin
 
-      - name: Set GKE Context
-        run: |
+      - run: |
           gcloud container clusters get-credentials nci-research-cluster \
             --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Deploy to GCP
-        run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
           kubectl apply -f k8s/gcp/
-          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0
           sleep 10
-
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
-
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           POD_COUNT=$(kubectl get pods --no-headers | wc -l)
           CPU=$(kubectl top pods --no-headers | awk '{sum+=$2} END {print sum}')
@@ -116,17 +107,7 @@ jobs:
 
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip,pod_count,cpu_usage_millicores,mem_usage_mib" > log.csv
           echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP,$POD_COUNT,$CPU,$MEM" >> log.csv
-
-      - name: Upload GCP log
-        run: |
-          echo "Trying to upload log to GCS..."
-          if gsutil ls gs://${{ env.GCP_LOG_BUCKET }}; then
-            gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-${{ github.run_id }}.csv
-          else
-            echo "⚠️ GCS upload failed: Check IAM permission or bucket access."
-          fi
-
-  # --- Azure and AWS jobs follow here (no changes) ---
+          gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-${{ github.run_id }}.csv
 
   deploy-azure:
     needs: build-and-push
@@ -141,8 +122,7 @@ jobs:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
-      - name: Deploy to Azure
-        run: |
+      - run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/azure/
           kubectl set image deployment/django-app django-container=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
@@ -176,8 +156,7 @@ jobs:
 
       - run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
 
-      - name: Deploy to AWS
-        run: |
+      - run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/aws/
           kubectl set image deployment/django-app django-container=${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
@@ -187,3 +166,31 @@ jobs:
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-${{ github.run_id }}.csv
+
+  merge-logs:
+    needs: [deploy-gcp, deploy-azure, deploy-aws]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all logs
+        run: |
+          mkdir -p logs
+          gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || echo "No GCP log"
+          az storage blob download-batch --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
+            --destination logs \
+            --source ${{ env.AZURE_LOG_CONTAINER }} \
+            --pattern deploy-log-azure-*.csv \
+            --account-key ${{ secrets.AZURE_STORAGE_KEY }}
+          aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "No AWS log"
+
+      - name: Merge logs
+        run: |
+          echo "cloud,start_time,end_time,duration_seconds,status,external_ip,pod_count,cpu_usage_millicores,mem_usage_mib" > all_cloud_logs.csv
+          for file in logs/*.csv; do
+            tail -n +2 "$file" >> all_cloud_logs.csv
+          done
+
+      - name: Upload merged logs
+        uses: actions/upload-artifact@v3
+        with:
+          name: all_cloud_logs
+          path: all_cloud_logs.csv
