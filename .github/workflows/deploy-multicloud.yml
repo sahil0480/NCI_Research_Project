@@ -104,35 +104,25 @@ jobs:
       - name: Deploy to GCP
         run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          echo "Applying Kubernetes manifests..."
           kubectl apply -f k8s/gcp/
-
-          echo "Deleting non-running pods before rollout (safe cleanup)..."
-          kubectl get pods --field-selector=status.phase!=Running -o name | \
-            xargs -r -n1 kubectl delete --force --grace-period=0 || true
-
-          echo "Wait briefly for system to settle..."
+          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0 || true
           sleep 10
-
-          echo "Set new Docker image for deployment..."
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
-
-          echo "Waiting for rollout to complete..."
           kubectl rollout status deployment django-app
-
-          echo "Fetching external IP..."
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
           echo "GCP External IP: $EXTERNAL_IP"
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          gsutil cp log.csv gs://$GCP_LOG_BUCKET/deploy-gcp-${{ github.run_id }}.csv || echo "GCS upload failed"
 
-          echo "Attempting to upload deployment log..."
-          gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv || \
-          echo "GCS upload failed (check IAM permissions, bucket access, etc.)"
+      - name: Cleanup GCP
+        run: |
+          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0 || true
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
+            xargs -r -I{} kubectl patch pvc {} -p '{"metadata":{"finalizers":null}}' --type=merge || true
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
+            xargs -r kubectl delete --force --grace-period=0 pvc || true
 
   deploy-azure:
     needs: build-and-push
@@ -207,3 +197,4 @@ jobs:
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
+
