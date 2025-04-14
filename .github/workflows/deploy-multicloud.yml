@@ -1,8 +1,9 @@
-name: Multi-Cloud Parallel Deploy to GKE, AKS and EKS
+name: Multi-Cloud Parallel Deploy to GKE, AKS, and EKS
 
 on:
   push:
-    branches: [ master ]
+    branches:
+      - master
 
 env:
   IMAGE_TAG: commit-${{ github.sha }}
@@ -19,12 +20,11 @@ env:
   AWS_LOG_BUCKET: nci-multicloud-logs-bucket
 
 jobs:
-# ---------- BUILD & PUSH ----------
+
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.set-tag.outputs.tag }}
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -36,7 +36,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # GCP Auth
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
@@ -45,7 +44,6 @@ jobs:
       - name: Configure Docker for GCP
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
-      # Azure Login
       - name: Login to Azure
         uses: azure/login@v1
         with:
@@ -54,7 +52,6 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      # AWS Auth
       - name: Parse AWS credentials
         id: parse_aws_creds
         run: |
@@ -83,31 +80,31 @@ jobs:
           docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
           docker push ${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
 
-# ---------- DEPLOY TO GCP ----------
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Install GKE Auth Plugin
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
-          echo 'USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
-
       - name: Get GKE Credentials
         run: |
+          echo "Installing GKE Auth Plugin manually..."
+          curl -sSL https://dl.google.com/cloudsdk/gke-gcloud-auth-plugin/linux_amd64/gke-gcloud-auth-plugin > gke-gcloud-auth-plugin
+          chmod +x gke-gcloud-auth-plugin
+          sudo mv gke-gcloud-auth-plugin /usr/local/bin/
+          echo 'USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
           gcloud container clusters get-credentials nci-research-cluster \
-            --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
+            --region ${{ env.GCP_REGION }} \
+            --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Cleanup GCP Stuck Resources
+      - name: Clean up stuck GCP pods and PVCs
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
           for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
@@ -116,23 +113,23 @@ jobs:
 
       - name: Deploy to GKE
         run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/gcp/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "GCP External IP: $EXTERNAL_IP"
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "GCP External IP: $EXTERNAL_IP"
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
 
-# ---------- DEPLOY TO AZURE ----------
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Login to Azure
         uses: azure/login@v1
@@ -145,37 +142,37 @@ jobs:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
-      - name: Cleanup Azure Stuck Resources
+      - name: Clean up stuck Azure pods and PVCs
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
-          for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
-            kubectl delete pvc "$pvc" --ignore-not-found
-          done
+          kubectl delete pvc postgres-pvc --ignore-not-found
+          kubectl delete pvc django-media-pvc-rwx --ignore-not-found
 
       - name: Deploy to AKS
         run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/azure/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "Azure External IP: $EXTERNAL_IP"
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "Azure External IP: $EXTERNAL_IP"
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           az storage blob upload \
             --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
             --container-name ${{ env.AZURE_LOG_CONTAINER }} \
             --name deploy-azure-${{ github.run_id }}.csv \
-            --file log.csv --auth-mode key \
+            --file log.csv \
+            --auth-mode key \
             --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
-# ---------- DEPLOY TO AWS ----------
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Parse AWS credentials
         id: parse_aws_creds
@@ -194,21 +191,20 @@ jobs:
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
 
-      - name: Cleanup AWS Stuck Resources
+      - name: Clean up stuck AWS pods and PVCs
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
-          for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
-            kubectl delete pvc "$pvc" --ignore-not-found
-          done
+          kubectl delete pvc postgres-pvc --ignore-not-found
+          kubectl delete pvc django-media-pvc-efs --ignore-not-found
 
       - name: Deploy to EKS
         run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/aws/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "AWS External Hostname: $EXTERNAL_IP"
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "AWS External IP: $EXTERNAL_IP"
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
