@@ -85,11 +85,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
-
       - uses: google-github-actions/setup-gcloud@v1
         with:
           install_components: gke-gcloud-auth-plugin
@@ -97,7 +95,6 @@ jobs:
       - run: |
           gcloud container clusters get-credentials nci-research-cluster \
             --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
-
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/gcp/
           sleep 10
@@ -108,7 +105,6 @@ jobs:
           CPU=$(kubectl top pods --no-headers | awk '{sum+=$2} END {print sum}')
           MEM=$(kubectl top pods --no-headers | awk '{sum+=$3} END {print sum}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip,pod_count,cpu_usage_millicores,mem_usage_mib" > log.csv
           echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP,$POD_COUNT,$CPU,$MEM" >> log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-${{ github.run_id }}.csv
@@ -125,7 +121,6 @@ jobs:
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
-
       - run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/azure/
@@ -151,15 +146,12 @@ jobs:
           echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_OUTPUT
           echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_OUTPUT
           echo "AWS_ACCOUNT_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccountId)" >> $GITHUB_OUTPUT
-
       - uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
           aws-access-key-id: ${{ steps.aws-creds.outputs.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ steps.aws-creds.outputs.AWS_SECRET_ACCESS_KEY }}
-
       - run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
-
       - run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/aws/
@@ -193,9 +185,13 @@ jobs:
             tail -n +2 "$file" >> all_cloud_logs.csv
           done
 
+      - name: Fix permission and clear cache (if needed)
+        run: |
+          sudo chown -R $USER:$USER /home/runner/work/
+          sudo rm -rf /home/runner/.toolcache/actions/upload-artifact || true
+
       - name: Upload merged logs
-        uses: actions/upload-artifact@v2.2.4
+        uses: actions/upload-artifact@v3
         with:
           name: all_cloud_logs
           path: all_cloud_logs.csv
-       
