@@ -33,7 +33,7 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Auth GCP
+      - name: Authenticate GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
@@ -41,7 +41,7 @@ jobs:
       - name: Configure Docker for GCP
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
-      - name: Login to Azure
+      - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
@@ -80,15 +80,16 @@ jobs:
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v3
 
-      - name: Setup gcloud + GKE Auth Plugin
+      - name: Setup gcloud and GKE Auth Plugin
         uses: google-github-actions/setup-gcloud@v1
         with:
           install_components: gke-gcloud-auth-plugin
 
-      - name: Auth GCP
+      - name: Authenticate GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
@@ -104,21 +105,27 @@ jobs:
         run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/gcp/
+          kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "GCP External IP: $EXTERNAL_IP"
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
 
       - name: Cleanup GCP
         run: |
-          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --grace-period=0
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | xargs -r kubectl delete pvc
+          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
+            xargs -r -I{} kubectl patch pvc {} -p '{"metadata":{"finalizers":null}}' --type=merge
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
+            xargs -r kubectl delete --force --grace-period=0 pvc
 
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v3
 
@@ -137,6 +144,7 @@ jobs:
         run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/azure/
+          kubectl set image deployment/django-app django-container=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -153,12 +161,16 @@ jobs:
 
       - name: Cleanup Azure
         run: |
-          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --grace-period=0
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | xargs -r kubectl delete pvc
+          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
+            xargs -r -I{} kubectl patch pvc {} -p '{"metadata":{"finalizers":null}}' --type=merge
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
+            xargs -r kubectl delete --force --grace-period=0 pvc
 
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v3
 
@@ -169,7 +181,7 @@ jobs:
           echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_OUTPUT
           echo "AWS_ACCOUNT_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccountId)" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
@@ -183,6 +195,7 @@ jobs:
         run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/aws/
+          kubectl set image deployment/django-app django-container=${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -193,5 +206,8 @@ jobs:
 
       - name: Cleanup AWS
         run: |
-          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --grace-period=0
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | xargs -r kubectl delete pvc
+          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
+            xargs -r -I{} kubectl patch pvc {} -p '{"metadata":{"finalizers":null}}' --type=merge
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
+            xargs -r kubectl delete --force --grace-period=0 pvc
