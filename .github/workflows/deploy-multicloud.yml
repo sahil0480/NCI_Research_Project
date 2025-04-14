@@ -2,8 +2,7 @@ name: Multi-Cloud Parallel Deploy to GKE, AKS and EKS
 
 on:
   push:
-    branches:
-      - master
+    branches: [ master ]
 
 env:
   IMAGE_TAG: commit-${{ github.sha }}
@@ -20,9 +19,7 @@ env:
   AWS_LOG_BUCKET: nci-multicloud-logs-bucket
 
 jobs:
-# -----------------------------------------------------------------------------------
-# Build and Push Docker Images to All Three Clouds
-# -----------------------------------------------------------------------------------
+# ---------- BUILD & PUSH ----------
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
@@ -39,6 +36,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # GCP Auth
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
@@ -47,6 +45,7 @@ jobs:
       - name: Configure Docker for GCP
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
+      # Azure Login
       - name: Login to Azure
         uses: azure/login@v1
         with:
@@ -55,6 +54,7 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
+      # AWS Auth
       - name: Parse AWS credentials
         id: parse_aws_creds
         run: |
@@ -83,34 +83,31 @@ jobs:
           docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
           docker push ${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
 
-# -----------------------------------------------------------------------------------
-# GCP Deployment
-# -----------------------------------------------------------------------------------
+# ---------- DEPLOY TO GCP ----------
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Install GKE Auth Plugin (WORKAROUND)
+      - name: Install GKE Auth Plugin
         run: |
-          sudo apt-get update && sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
+          sudo apt-get update
+          sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
           echo 'USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
 
       - name: Get GKE Credentials
         run: |
           gcloud container clusters get-credentials nci-research-cluster \
-            --region ${{ env.GCP_REGION }} \
-            --project ${{ env.GCP_PROJECT_ID }}
+            --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Clean up GCP PVCs and pods
+      - name: Cleanup GCP Stuck Resources
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
           for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
@@ -129,16 +126,13 @@ jobs:
           echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
 
-# -----------------------------------------------------------------------------------
-# Azure Deployment
-# -----------------------------------------------------------------------------------
+# ---------- DEPLOY TO AZURE ----------
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Login to Azure
         uses: azure/login@v1
@@ -151,7 +145,7 @@ jobs:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
-      - name: Clean up Azure PVCs and pods
+      - name: Cleanup Azure Stuck Resources
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
           for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
@@ -172,20 +166,16 @@ jobs:
             --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
             --container-name ${{ env.AZURE_LOG_CONTAINER }} \
             --name deploy-azure-${{ github.run_id }}.csv \
-            --file log.csv \
-            --auth-mode key \
+            --file log.csv --auth-mode key \
             --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
-# -----------------------------------------------------------------------------------
-# AWS Deployment
-# -----------------------------------------------------------------------------------
+# ---------- DEPLOY TO AWS ----------
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Parse AWS credentials
         id: parse_aws_creds
@@ -204,7 +194,7 @@ jobs:
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
 
-      - name: Clean up AWS PVCs and pods
+      - name: Cleanup AWS Stuck Resources
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
           for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
@@ -216,7 +206,7 @@ jobs:
           kubectl apply -f k8s/aws/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "AWS External IP: $EXTERNAL_IP"
+          echo "AWS External Hostname: $EXTERNAL_IP"
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
