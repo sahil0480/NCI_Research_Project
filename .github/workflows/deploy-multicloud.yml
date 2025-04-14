@@ -93,8 +93,7 @@ jobs:
           install_components: gke-gcloud-auth-plugin
 
       - run: |
-          gcloud container clusters get-credentials nci-research-cluster \
-            --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
+          gcloud container clusters get-credentials nci-research-cluster --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/gcp/
           sleep 10
@@ -121,6 +120,7 @@ jobs:
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
+
       - run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/azure/
@@ -130,10 +130,7 @@ jobs:
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
-          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
-            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
-            --name deploy-log-azure-${{ github.run_id }}.csv \
-            --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
+          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} --container-name ${{ env.AZURE_LOG_CONTAINER }} --name deploy-log-azure-${{ github.run_id }}.csv --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
   deploy-aws:
     needs: build-and-push
@@ -163,35 +160,65 @@ jobs:
           echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-${{ github.run_id }}.csv
 
-  merge-logs:
+  collect-logs:
     needs: [deploy-gcp, deploy-azure, deploy-aws]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all logs
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install required tools
+        run: |
+          pip install pandas
+          sudo apt-get update
+          sudo apt-get install -y google-cloud-sdk awscli
+
+      - name: Download logs from GCP
         run: |
           mkdir -p logs
-          gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || echo "No GCP log"
+          gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || echo "⚠️ No GCP logs"
+
+      - name: Download logs from Azure
+        run: |
           az storage blob download-batch --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
-            --destination logs \
-            --source ${{ env.AZURE_LOG_CONTAINER }} \
+            --destination logs --source ${{ env.AZURE_LOG_CONTAINER }} \
             --pattern deploy-log-azure-*.csv \
-            --account-key ${{ secrets.AZURE_STORAGE_KEY }}
-          aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "No AWS log"
+            --account-key ${{ secrets.AZURE_STORAGE_KEY }} || echo "⚠️ No Azure logs"
 
-      - name: Merge logs
+      - name: Download logs from AWS
         run: |
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip,pod_count,cpu_usage_millicores,mem_usage_mib" > all_cloud_logs.csv
-          for file in logs/*.csv; do
-            tail -n +2 "$file" >> all_cloud_logs.csv
-          done
+          aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ \
+            --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "⚠️ No AWS logs"
 
-      - name: Fix permission and clear cache (if needed)
-        run: |
-          sudo chown -R $USER:$USER /home/runner/work/
-          sudo rm -rf /home/runner/.toolcache/actions/upload-artifact || true
+  train-model:
+    needs: collect-logs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Upload merged logs
-        uses: actions/upload-artifact@v3.1.3
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          name: all_cloud_logs
-          path: all_cloud_logs.csv
+          python-version: '3.9'
+
+      - name: Install Python packages
+        run: |
+          pip install azureml-core azure-identity pandas scikit-learn xgboost lightgbm matplotlib boto3 google-cloud-storage
+
+      - name: Write Azure ML config
+        run: |
+          mkdir -p ml/.azureml
+          echo '${{ secrets.AZURE_ML_KEY }}' > ml/.azureml/config.json
+
+      - name: Trigger Azure ML Training
+        working-directory: ml
+        run: python azureml_train.py
+
+      - name: Show Training Result
+        run: cat ml/best_result.txt
