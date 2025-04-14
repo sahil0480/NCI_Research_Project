@@ -1,0 +1,7 @@
+code: ../  # relative path to include train_model.py in root
+command: >
+  python ml/train_model.py
+environment: azureml/python-sdk:latest
+compute: azureml:cpu-cluster
+experiment_name: cloud-performance-training
+description: Train ML model to evaluate best cloud
