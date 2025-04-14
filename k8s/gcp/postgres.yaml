@@ -26,6 +26,13 @@ spec:
               value: "django_pass"
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
           volumeMounts:
             - name: postgres-storage
               mountPath: /var/lib/postgresql/data
