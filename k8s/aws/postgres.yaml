@@ -32,7 +32,7 @@ spec:
       volumes:
         - name: postgres-storage
           persistentVolumeClaim:
-            claimName: postgres-pvc
+            claimName: postgres-pvc-efs
 ---
 apiVersion: v1
 kind: Service

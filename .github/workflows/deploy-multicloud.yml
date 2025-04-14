@@ -1,12 +1,10 @@
-name: Multi-Cloud Parallel Deploy to GKE, AKS, and EKS
+name: Multi-Cloud Deploy (GCP, Azure, AWS)
 
 on:
   push:
-    branches:
-      - master
+    branches: [ master ]
 
 env:
-  IMAGE_TAG: commit-${{ github.sha }}
   IMAGE_NAME: django-app
   GCP_PROJECT_ID: nci-research-project
   GCP_REGION: europe-west1
@@ -20,31 +18,30 @@ env:
   AWS_LOG_BUCKET: nci-multicloud-logs-bucket
 
 jobs:
-
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.set-tag.outputs.tag }}
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set Image Tag
         id: set-tag
         run: echo "tag=commit-${{ github.sha }}" >> $GITHUB_OUTPUT
 
-      - name: Set up Docker Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Authenticate to GCP
+      - name: GCP Auth
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Configure Docker for GCP
+      - name: GCP Docker Auth
         run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
-      - name: Login to Azure
+      - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
@@ -52,86 +49,81 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      - name: Parse AWS credentials
-        id: parse_aws_creds
+      - name: AWS Credentials
+        id: aws-creds
         run: |
           echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_OUTPUT
           echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_OUTPUT
           echo "AWS_ACCOUNT_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccountId)" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS credentials
+      - name: AWS Configure
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ steps.parse_aws_creds.outputs.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ steps.parse_aws_creds.outputs.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ steps.aws-creds.outputs.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ steps.aws-creds.outputs.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Login to Amazon ECR
+      - name: AWS ECR Login
         run: |
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-          docker login --username AWS --password-stdin ${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          docker login --username AWS --password-stdin ${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-      - name: Build and Push Docker Images
+      - name: Build and Push Images
         run: |
           docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
                        -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
-                       -t ${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} .
+                       -t ${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} .
           docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
           docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
-          docker push ${{ steps.parse_aws_creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+          docker push ${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
 
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Authenticate to GCP
+      - name: Setup GCP + GKE Plugin
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Auth to GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Get GKE Credentials
+      - name: Set GKE Context
         run: |
-          echo "Installing GKE Auth Plugin manually..."
-          curl -sSL https://dl.google.com/cloudsdk/gke-gcloud-auth-plugin/linux_amd64/gke-gcloud-auth-plugin > gke-gcloud-auth-plugin
-          chmod +x gke-gcloud-auth-plugin
-          sudo mv gke-gcloud-auth-plugin /usr/local/bin/
-          echo 'USE_GKE_GCLOUD_AUTH_PLUGIN=True' >> $GITHUB_ENV
           gcloud container clusters get-credentials nci-research-cluster \
             --region ${{ env.GCP_REGION }} \
             --project ${{ env.GCP_PROJECT_ID }}
 
-      - name: Clean up stuck GCP pods and PVCs
+      - name: Cleanup Stuck Pods & PVCs
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
-          for pvc in $(kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name'); do
-            kubectl delete pvc "$pvc" --ignore-not-found
+          for pvc in $(kubectl get pvc -o name); do
+            kubectl patch $pvc -p '{"metadata":{"finalizers":null}}' --type=merge || true
+            kubectl delete $pvc --ignore-not-found
           done
 
-      - name: Deploy to GKE
+      - name: Deploy to GCP
         run: |
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          sed -e "s|PLACEHOLDER_IMAGE|europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}|" k8s/gcp/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/gcp/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "GCP External IP: $EXTERNAL_IP"
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
-          gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
+          echo "✅ GCP External IP: $EXTERNAL_IP"
 
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Login to Azure
+      - name: Azure Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
@@ -142,40 +134,31 @@ jobs:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
 
-      - name: Clean up stuck Azure pods and PVCs
+      - name: Cleanup Stuck Resources
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
-          kubectl delete pvc postgres-pvc --ignore-not-found
-          kubectl delete pvc django-media-pvc-rwx --ignore-not-found
+          for pvc in $(kubectl get pvc -o name); do
+            kubectl patch $pvc -p '{"metadata":{"finalizers":null}}' --type=merge || true
+            kubectl delete $pvc --ignore-not-found
+          done
 
-      - name: Deploy to AKS
+      - name: Deploy to Azure
         run: |
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          sed -e "s|PLACEHOLDER_IMAGE|${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}|" k8s/azure/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/azure/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "Azure External IP: $EXTERNAL_IP"
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
-          az storage blob upload \
-            --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
-            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
-            --name deploy-azure-${{ github.run_id }}.csv \
-            --file log.csv \
-            --auth-mode key \
-            --account-key ${{ secrets.AZURE_STORAGE_KEY }}
+          echo "✅ Azure External IP: $EXTERNAL_IP"
 
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Parse AWS credentials
-        id: parse_aws_creds
+        id: aws-creds
         run: |
           echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_OUTPUT
           echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_OUTPUT
@@ -185,26 +168,24 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ steps.parse_aws_creds.outputs.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ steps.parse_aws_creds.outputs.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ steps.aws-creds.outputs.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ steps.aws-creds.outputs.AWS_SECRET_ACCESS_KEY }}
 
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
 
-      - name: Clean up stuck AWS pods and PVCs
+      - name: Clean AWS Cluster
         run: |
           kubectl delete pods --field-selector=status.phase!=Running --ignore-not-found
-          kubectl delete pvc postgres-pvc --ignore-not-found
-          kubectl delete pvc django-media-pvc-efs --ignore-not-found
+          for pvc in $(kubectl get pvc -o name); do
+            kubectl patch $pvc -p '{"metadata":{"finalizers":null}}' --type=merge || true
+            kubectl delete $pvc --ignore-not-found
+          done
 
-      - name: Deploy to EKS
+      - name: Deploy to AWS
         run: |
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          sed -e "s|PLACEHOLDER_IMAGE|${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}|" k8s/aws/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/aws/
           kubectl rollout status deployment django-app
           EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "AWS External IP: $EXTERNAL_IP"
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
-          aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
+          echo "✅ AWS External IP: $EXTERNAL_IP"
