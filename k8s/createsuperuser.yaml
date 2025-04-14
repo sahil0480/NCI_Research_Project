@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-superuser
+spec:
+  template:
+    spec:
+      containers:
+      - name: django
+        image: PLACEHOLDER_IMAGE
+        command: ["python", "manage.py", "createsuperuser", "--noinput"]
+        env:
+        - name: DJANGO_SUPERUSER_USERNAME
+          value: sahilxshaikh
+        - name: DJANGO_SUPERUSER_EMAIL
+          value: sahilx0480@gmail.com
+        - name: DJANGO_SUPERUSER_PASSWORD
+          value: S@hil029
+        - name: DEBUG
+          value: "True"
+        - name: SECRET_KEY
+          value: "your-secret-key"
+        - name: DB_NAME
+          value: "Research_Project"
+        - name: DB_USER
+          value: "django_user"
+        - name: DB_PASSWORD
+          value: "django_pass"
+        - name: DB_HOST
+          value: "db"
+        - name: DB_PORT
+          value: "5432"
+      restartPolicy: Never
+  backoffLimit: 1
