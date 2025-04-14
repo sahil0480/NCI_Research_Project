@@ -190,7 +190,8 @@ jobs:
           done
 
       - name: Upload merged logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v2
         with:
           name: all_cloud_logs
           path: all_cloud_logs.csv
+       
