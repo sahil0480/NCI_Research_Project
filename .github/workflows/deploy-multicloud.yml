@@ -80,7 +80,6 @@ jobs:
   deploy-gcp:
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
 
@@ -101,14 +100,6 @@ jobs:
             --project ${{ env.GCP_PROJECT_ID }}
           echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
-      - name: Force Cleanup GCP
-        run: |
-          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
-            xargs -r -I{} kubectl patch pvc {} -p '{"metadata":{"finalizers":null}}' --type=merge
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
-            xargs -r kubectl delete --force --grace-period=0 pvc
-
       - name: Deploy to GCP
         run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -120,10 +111,14 @@ jobs:
           echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-gcp-${{ github.run_id }}.csv
 
+      - name: Cleanup GCP
+        run: |
+          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --grace-period=0
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | xargs -r kubectl delete pvc
+
   deploy-azure:
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
 
@@ -137,14 +132,6 @@ jobs:
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
-
-      - name: Force Cleanup Azure
-        run: |
-          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
-            xargs -r -I{} kubectl patch pvc {} -p '{"metadata":{"finalizers":null}}' --type=merge
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
-            xargs -r kubectl delete --force --grace-period=0 pvc
 
       - name: Deploy to Azure
         run: |
@@ -164,10 +151,14 @@ jobs:
             --auth-mode key \
             --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
+      - name: Cleanup Azure
+        run: |
+          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --grace-period=0
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | xargs -r kubectl delete pvc
+
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
 
@@ -188,14 +179,6 @@ jobs:
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
 
-      - name: Force Cleanup AWS
-        run: |
-          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --force --grace-period=0
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
-            xargs -r -I{} kubectl patch pvc {} -p '{"metadata":{"finalizers":null}}' --type=merge
-          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | \
-            xargs -r kubectl delete --force --grace-period=0 pvc
-
       - name: Deploy to AWS
         run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -207,3 +190,8 @@ jobs:
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-aws-${{ github.run_id }}.csv
+
+      - name: Cleanup AWS
+        run: |
+          kubectl get pods --field-selector=status.phase!=Running -o name | xargs -r kubectl delete --grace-period=0
+          kubectl get pvc -o json | jq -r '.items[] | select(.status.phase != "Bound") | .metadata.name' | xargs -r kubectl delete pvc
