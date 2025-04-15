@@ -49,6 +49,7 @@ jobs:
             echo "tag=commit-${{ github.sha }}" >> $GITHUB_OUTPUT
           else
             echo "tag=latest" >> $GITHUB_OUTPUT
+          fi
 
   build-and-push:
     needs: changes
