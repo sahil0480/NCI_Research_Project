@@ -22,6 +22,7 @@ env:
   AWS_LOG_BUCKET: nci-multicloud-logs-bucket
 
 jobs:
+
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
@@ -92,8 +93,7 @@ jobs:
         with:
           install_components: gke-gcloud-auth-plugin
       - run: |
-          gcloud container clusters get-credentials nci-research-cluster \
-            --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
+          gcloud container clusters get-credentials nci-research-cluster --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/gcp/
           sleep 10
@@ -129,10 +129,7 @@ jobs:
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
-          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
-            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
-            --name deploy-log-azure-${{ github.run_id }}.csv \
-            --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
+          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} --container-name ${{ env.AZURE_LOG_CONTAINER }} --name deploy-log-azure-${{ github.run_id }}.csv --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
   deploy-aws:
     needs: build-and-push
@@ -173,22 +170,35 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install CLI tools and pandas
+      - name: Install tools
         run: |
-          pip install pandas awscli
-          curl -sSL https://sdk.cloud.google.com | bash || true
-          echo "$HOME/google-cloud-sdk/bin" >> $GITHUB_PATH
+          sudo apt-get update
+          sudo apt-get install -y jq
+          pip install pandas
+
+      - name: GCP Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: AWS Auth
+        id: aws-creds
+        run: |
+          echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_ENV
 
       - name: Download logs
         run: |
           mkdir -p logs
+          echo "🔽 GCP Logs:"
           gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || echo "⚠️ No GCP logs"
+          echo "🔽 Azure Logs:"
           az storage blob download-batch --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
             --destination logs --source ${{ env.AZURE_LOG_CONTAINER }} \
             --pattern deploy-log-azure-*.csv \
             --account-key ${{ secrets.AZURE_STORAGE_KEY }} || echo "⚠️ No Azure logs"
-          aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ \
-            --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "⚠️ No AWS logs"
+          echo "🔽 AWS Logs:"
+          aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "⚠️ No AWS logs"
 
   train-model:
     needs: collect-logs
@@ -201,7 +211,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Python packages
+      - name: Install packages
         run: |
           pip install azureml-core azure-identity pandas scikit-learn xgboost lightgbm matplotlib boto3 google-cloud-storage
 
