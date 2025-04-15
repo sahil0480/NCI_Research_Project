@@ -224,7 +224,8 @@ jobs:
       - name: Write Azure ML config
         run: |
           mkdir -p ml/.azureml
-          echo "${{ secrets.AZURE_ML_KEY }}" > ml/.azureml/config.json
+          echo '${{ secrets.AZURE_ML_KEY }}' > ml/.azureml/config.json
+          cat ml/.azureml/config.json
 
       - name: Trigger Azure ML Training
         working-directory: ml
