@@ -91,9 +91,9 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v1
         with:
           install_components: gke-gcloud-auth-plugin
-
       - run: |
-          gcloud container clusters get-credentials nci-research-cluster --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
+          gcloud container clusters get-credentials nci-research-cluster \
+            --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/gcp/
           sleep 10
@@ -120,7 +120,6 @@ jobs:
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
-
       - run: |
           START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           kubectl apply -f k8s/azure/
@@ -130,7 +129,10 @@ jobs:
           END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
           echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
-          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} --container-name ${{ env.AZURE_LOG_CONTAINER }} --name deploy-log-azure-${{ github.run_id }}.csv --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
+          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
+            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
+            --name deploy-log-azure-${{ github.run_id }}.csv \
+            --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
   deploy-aws:
     needs: build-and-push
@@ -164,34 +166,27 @@ jobs:
     needs: [deploy-gcp, deploy-azure, deploy-aws]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install required tools
+      - name: Install CLI tools and pandas
         run: |
-          pip install pandas
-          sudo apt-get update
-          sudo apt-get install -y google-cloud-sdk awscli
+          pip install pandas awscli
+          curl -sSL https://sdk.cloud.google.com | bash || true
+          echo "$HOME/google-cloud-sdk/bin" >> $GITHUB_PATH
 
-      - name: Download logs from GCP
+      - name: Download logs
         run: |
           mkdir -p logs
           gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || echo "⚠️ No GCP logs"
-
-      - name: Download logs from Azure
-        run: |
           az storage blob download-batch --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
             --destination logs --source ${{ env.AZURE_LOG_CONTAINER }} \
             --pattern deploy-log-azure-*.csv \
             --account-key ${{ secrets.AZURE_STORAGE_KEY }} || echo "⚠️ No Azure logs"
-
-      - name: Download logs from AWS
-        run: |
           aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ \
             --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "⚠️ No AWS logs"
 
@@ -199,13 +194,12 @@ jobs:
     needs: collect-logs
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
       - name: Install Python packages
         run: |
