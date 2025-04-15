@@ -16,7 +16,7 @@ svc_pr = ServicePrincipalAuthentication(
 ws = Workspace(
     subscription_id=config["subscriptionId"],
     resource_group=os.environ["AZURE_RESOURCE_GROUP"],
-    workspace_name="model_training",
+    workspace_name="nci-ml-workspace",
     auth=svc_pr
 )
 
