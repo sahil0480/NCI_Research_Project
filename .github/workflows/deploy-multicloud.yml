@@ -38,7 +38,7 @@ jobs:
 
   build-and-push:
     needs: detect-changes
-    if: needs.detect-changes.outputs.django_changed == 'true'
+    if: always()
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.set-tag.outputs.tag }}
