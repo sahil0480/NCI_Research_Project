@@ -1,5 +1,12 @@
 {
-    "subscription_id": "6897121f-97fc-4479-8d33-a05307e01483",
-    "resource_group": "nci-azure-rg",
-    "workspace_name": "model_training"
+    "clientId": "89559ad9-bb61-4abb-8450-202ad93d00ec",
+    "clientSecret": "VUM8Q~7sypfr9pByAkNTdXAeapUWA5r9wrOeAcG9",
+    "subscriptionId": "6897121f-97fc-4479-8d33-a05307e01483",
+    "tenantId": "50147da2-cd70-4a09-ace7-0803d9ad7874",
+    "activeDirectoryEndpointUrl": "https://login.microsoftonline.com",
+    "resourceManagerEndpointUrl": "https://management.azure.com/",
+    "activeDirectoryGraphResourceId": "https://graph.windows.net/",
+    "sqlManagementEndpointUrl": "https://management.core.windows.net:8443/",
+    "galleryEndpointUrl": "https://gallery.azure.com/",
+    "managementEndpointUrl": "https://management.core.windows.net/"
   }
