@@ -4,7 +4,7 @@ import os
 import json
 
 # Load credentials from secret
-with open("ml/.azureml/config.json") as f:
+with open(".azureml/config.json") as f:
     config = json.load(f)
 
 svc_pr = ServicePrincipalAuthentication(
