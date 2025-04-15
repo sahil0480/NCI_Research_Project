@@ -16,6 +16,7 @@ env:
   AZURE_LOG_CONTAINER: deployment-logs
   AWS_REGION: eu-west-1
   AWS_LOG_BUCKET: nci-multicloud-logs-bucket
+  USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
 
 jobs:
 
@@ -49,33 +50,26 @@ jobs:
       - name: Azure ACR Login
         run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      - name: Parse AWS credentials
-        id: aws-creds
-        run: |
-          echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_ENV
-          echo "AWS_ACCOUNT_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccountId)" >> $GITHUB_ENV
-
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: AWS ECR Login
         run: |
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-          docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
       - name: Build and Push Docker Images
         run: |
           docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
                        -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
-                       -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} .
+                       -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} .
           docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
           docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
-          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
 
   deploy-gcp:
     needs: build-and-push
@@ -83,17 +77,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install GKE Auth Plugin
-        run: |
-          sudo apt-get update && sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
-          echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
-
       - name: Auth GCP
         uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      - name: Setup GCloud
+      - name: Setup GCloud with GKE Auth Plugin
         uses: google-github-actions/setup-gcloud@v1
         with:
           install_components: gke-gcloud-auth-plugin
@@ -106,8 +95,7 @@ jobs:
       - name: Deploy to GCP
         run: |
           START=$(date -u +%s)
-          kubectl apply -f k8s/gcp/ --validate=false
-          sleep 10
+          kubectl apply -f k8s/gcp/
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
           END=$(date -u +%s)
@@ -127,7 +115,9 @@ jobs:
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
-      - run: |
+
+      - name: Deploy to Azure
+        run: |
           START=$(date -u +%s)
           kubectl apply -f k8s/azure/
           kubectl set image deployment/django-app django-container=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
@@ -135,29 +125,78 @@ jobs:
           END=$(date -u +%s)
           echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
           echo "Azure,$START,$END,$((END-START)),success" >> log.csv
-          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} --container-name ${{ env.AZURE_LOG_CONTAINER }} --name deploy-log-azure-${{ github.run_id }}.csv --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
+          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
+            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
+            --name deploy-log-azure-${{ github.run_id }}.csv \
+            --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
   deploy-aws:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
       - run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
-      - run: |
+
+      - name: Deploy to AWS
+        run: |
           START=$(date -u +%s)
           kubectl apply -f k8s/aws/
-          kubectl set image deployment/django-app django-container=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          kubectl set image deployment/django-app django-container=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
           END=$(date -u +%s)
           echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
           echo "AWS,$START,$END,$((END-START)),success" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-${{ github.run_id }}.csv
 
- 
-          
+  collect-logs:
+    needs: [deploy-gcp, deploy-azure, deploy-aws]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          pip install pandas
+
+      - name: GCP Auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Download logs
+        run: |
+          mkdir -p logs
+          echo "Downloading logs..."
+          gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || echo "⚠️ No GCP logs"
+          az storage blob download-batch --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
+            --destination logs --source ${{ env.AZURE_LOG_CONTAINER }} \
+            --pattern deploy-log-azure-*.csv \
+            --account-key ${{ secrets.AZURE_STORAGE_KEY }} || echo "⚠️ No Azure logs"
+          aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "⚠️ No AWS logs"
