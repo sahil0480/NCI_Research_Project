@@ -1,23 +1,28 @@
-for ctx in $(kubectl config get-contexts -o name); do
-  echo "🧼 Cleaning up context: $ctx"
-  
-  # Delete all pods
-  echo "⛔ Deleting all pods..."
-  kubectl --context="$ctx" delete pods --all --ignore-not-found
+#!/bin/bash
 
-  # Delete all PVCs normally
-  echo "🗑️ Deleting PVCs..."
-  kubectl --context="$ctx" delete pvc --all --ignore-not-found
+# List of contexts
+CONTEXTS=(
+  "arn:aws:eks:eu-west-1:881026660495:cluster/nci-research-eks"
+  "nci-aks-cluster"
+  "gke_nci-research-project_europe-west1_nci-research-cluster"
+)
 
-  # Force delete stuck/terminating PVCs
-  echo "🔥 Force deleting stuck PVCs (if any)..."
-  stuck_pvcs=$(kubectl --context="$ctx" get pvc | grep Terminating | awk '{print $1}')
-  for pvc in $stuck_pvcs; do
-    echo "Force deleting PVC: $pvc"
-    kubectl --context="$ctx" patch pvc "$pvc" -p '{"metadata":{"finalizers":null}}' --type=merge
+for CONTEXT in "${CONTEXTS[@]}"; do
+  echo "🌀 Switching to context: $CONTEXT"
+  kubectl config use-context "$CONTEXT"
+
+  echo "🔥 Deleting all pods (forcefully)..."
+  kubectl delete pods --all --grace-period=0 --force
+
+  echo "🧹 Deleting all PVCs (handling stuck ones)..."
+  for pvc in $(kubectl get pvc --no-headers | awk '{print $1}'); do
+    echo "➡️ Patching and deleting PVC: $pvc"
+    kubectl patch pvc "$pvc" -p '{"metadata":{"finalizers":null}}' --type=merge
+    kubectl delete pvc "$pvc" --grace-period=0 --force
   done
 
-  echo "✅ Done with $ctx"
-  echo "-----------------------------"
+  echo "✅ Cleanup done for: $CONTEXT"
+  echo "-------------------------------"
 done
 
+echo "🎉 Multi-cloud cleanup complete!"
