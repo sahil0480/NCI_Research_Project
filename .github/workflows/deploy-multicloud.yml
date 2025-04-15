@@ -23,7 +23,22 @@ env:
 
 jobs:
 
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      django_changed: ${{ steps.filter.outputs.django }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            django:
+              - 'django-app/**'
+
   build-and-push:
+    needs: changes
+    if: needs.changes.outputs.django_changed == 'true'
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.set-tag.outputs.tag }}
@@ -75,11 +90,11 @@ jobs:
       - name: Build and Push Docker Images
         run: |
           docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
-                       -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
-                       -t ${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} .
+                       -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/ml-${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
+                       -t ${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/ml-${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} .
           docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
-          docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
-          docker push ${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+          docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/ml-${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+          docker push ${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/ml-${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
 
   deploy-gcp:
     needs: build-and-push
@@ -94,18 +109,14 @@ jobs:
           install_components: gke-gcloud-auth-plugin
       - run: |
           gcloud container clusters get-credentials nci-research-cluster --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          START=$(date -u +%s)
           kubectl apply -f k8s/gcp/
           sleep 10
           kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
-          EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          POD_COUNT=$(kubectl get pods --no-headers | wc -l)
-          CPU=$(kubectl top pods --no-headers | awk '{sum+=$2} END {print sum}')
-          MEM=$(kubectl top pods --no-headers | awk '{sum+=$3} END {print sum}')
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip,pod_count,cpu_usage_millicores,mem_usage_mib" > log.csv
-          echo "GCP,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP,$POD_COUNT,$CPU,$MEM" >> log.csv
+          END=$(date -u +%s)
+          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
+          echo "GCP,$START,$END,$((END-START)),success" >> log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-${{ github.run_id }}.csv
 
   deploy-azure:
@@ -121,14 +132,13 @@ jobs:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
       - run: |
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          START=$(date -u +%s)
           kubectl apply -f k8s/azure/
-          kubectl set image deployment/django-app django-container=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          kubectl set image deployment/django-app django-container=${{ env.AZURE_ACR_NAME }}.azurecr.io/ml-${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
-          EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "Azure,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          END=$(date -u +%s)
+          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
+          echo "Azure,$START,$END,$((END-START)),success" >> log.csv
           az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} --container-name ${{ env.AZURE_LOG_CONTAINER }} --name deploy-log-azure-${{ github.run_id }}.csv --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
   deploy-aws:
@@ -149,19 +159,20 @@ jobs:
           aws-secret-access-key: ${{ steps.aws-creds.outputs.AWS_SECRET_ACCESS_KEY }}
       - run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
       - run: |
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          START=$(date -u +%s)
           kubectl apply -f k8s/aws/
-          kubectl set image deployment/django-app django-container=${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          kubectl set image deployment/django-app django-container=${{ steps.aws-creds.outputs.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/ml-${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           kubectl rollout status deployment django-app
-          EXTERNAL_IP=$(kubectl get svc django-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          echo "cloud,start_time,end_time,duration_seconds,status,external_ip" > log.csv
-          echo "AWS,$START_TIME,$END_TIME,$(( $(date -d "$END_TIME" +%s) - $(date -d "$START_TIME" +%s) )),success,$EXTERNAL_IP" >> log.csv
+          END=$(date -u +%s)
+          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
+          echo "AWS,$START,$END,$((END-START)),success" >> log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-${{ github.run_id }}.csv
 
   collect-logs:
     needs: [deploy-gcp, deploy-azure, deploy-aws]
     runs-on: ubuntu-latest
+    outputs:
+      merged_log_path: ${{ steps.merge.outputs.path }}
     steps:
       - uses: actions/checkout@v3
 
@@ -172,64 +183,50 @@ jobs:
 
       - name: Install tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+          sudo apt-get update && sudo apt-get install -y jq
           pip install pandas
-
-      - name: GCP Auth
-        uses: google-github-actions/auth@v1
-        with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
-      
-      - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@v1
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-          install_components: gke-gcloud-auth-plugin
-
-      - name: AWS Auth
-        id: aws-creds
-        run: |
-          echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_ENV
 
       - name: Download logs
         run: |
           mkdir -p logs
-          echo "🔽 GCP Logs:"
-          gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || echo "⚠️ No GCP logs"
-          echo "🔽 Azure Logs:"
+          echo "Downloading GCP logs..."
+          gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || true
+          echo "Downloading Azure logs..."
           az storage blob download-batch --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
-            --destination logs --source ${{ env.AZURE_LOG_CONTAINER }} \
-            --pattern deploy-log-azure-*.csv \
-            --account-key ${{ secrets.AZURE_STORAGE_KEY }} || echo "⚠️ No Azure logs"
-          echo "🔽 AWS Logs:"
-          aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "⚠️ No AWS logs"
+              --destination logs --source ${{ env.AZURE_LOG_CONTAINER }} \
+              --pattern deploy-log-azure-*.csv \
+              --account-key ${{ secrets.AZURE_STORAGE_KEY }} || true
+          echo "Downloading AWS logs..."
+          aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ --recursive --exclude "*" --include "deploy-log-aws-*.csv" || true
+
+      - name: Merge logs
+        id: merge
+        run: |
+          python scripts/merge_logs.py
+          echo "path=logs/merged_logs.csv" >> $GITHUB_OUTPUT
 
   train-model:
     needs: collect-logs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install packages
+      - name: Install ML packages
         run: |
-          pip install azureml-core azure-identity pandas scikit-learn xgboost lightgbm matplotlib boto3 google-cloud-storage
+          pip install azureml-core azure-identity pandas scikit-learn xgboost lightgbm matplotlib
 
-      - name: Write Azure ML config
+      - name: Write AzureML config
         run: |
           mkdir -p ml/.azureml
           echo '${{ secrets.AZURE_ML_KEY }}' > ml/.azureml/config.json
-          cat ml/.azureml/config.json
 
-      - name: Trigger Azure ML Training
+      - name: Trigger Azure ML
         working-directory: ml
-        run: python azureml_train.py
+        run: python azureml_train.py --log-file ../${{ needs.collect-logs.outputs.merged_log_path }}
 
-      - name: Show Training Result
+      - name: Show Training Output
         run: cat ml/best_result.txt
