@@ -1,81 +1,72 @@
-import sys
 import pandas as pd
+import sys
 import joblib
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
-from xgboost import XGBClassifier
+from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score
+from sklearn.linear_model import LogisticRegressio
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from xgboost import XGBClassifier
 
-def load_data(filepath):
-    df = pd.read_csv(filepath)
-    df = df[df['status'] == 'success']
-    df = df.drop(columns=['status'])
+# Load CSV file
+if len(sys.argv) != 2:
+    print("Usage: python train_model.py merged_logs.csv")
+    sys.exit(1)
 
-    # Feature Engineering
-    df['start_time'] = pd.to_numeric(df['start_time'], errors='coerce')
-    df['end_time'] = pd.to_numeric(df['end_time'], errors='coerce')
-    df['duration_seconds'] = pd.to_numeric(df['duration_seconds'], errors='coerce')
-    df = df.dropna()
+df = pd.read_csv(sys.argv[1])
 
-    # Encode cloud as target
-    df['cloud'] = df['cloud'].astype('category').cat.codes
-    return df
+# Preprocess
+df = df.dropna()
+df = df[df['status'] == 'success']  # Filter only successful deploys
 
-def train_and_select_best(X_train, y_train, X_test, y_test):
-    models = {
-        'RandomForest': RandomForestClassifier(n_estimators=100, random_state=42),
-        'XGBoost': XGBClassifier(use_label_encoder=False, eval_metric='mlogloss'),
-        'GradientBoosting': GradientBoostingClassifier(),
-        'LogisticRegression': LogisticRegression(max_iter=500)
-    }
+# Encode cloud as label
+le = LabelEncoder()
+df['cloud_encoded'] = le.fit_transform(df['cloud'])  # GCP, Azure, AWS -> 0,1,2
 
-    best_model = None
-    best_score = 0
-    best_name = ""
+# Features and target
+X = df[['duration_seconds']]
+y = df['cloud_encoded']
 
-    for name, model in models.items():
-        model.fit(X_train, y_train)
-        preds = model.predict(X_test)
-        acc = accuracy_score(y_test, preds)
-        print(f"{name} accuracy: {acc:.4f}")
+# Train/test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-        if acc > best_score:
-            best_model = model
-            best_score = acc
-            best_name = name
+# Models
+models = {
+    'LogisticRegression': LogisticRegression(),
+    'RandomForest': RandomForestClassifier(),
+    'XGBoost': XGBClassifier(use_label_encoder=False, eval_metric='mlogloss'),
+    'KNN': KNeighborsClassifier()
+}
 
-    print(f"\n✔️ Best model: {best_name} (Accuracy: {best_score:.4f})")
-    return best_model
+best_model = None
+best_acc = 0
+best_model_name = ""
+best_model_file = "model.pkl"
 
-def save_outputs(model, best_cloud_index, label_map):
-    joblib.dump(model, "model.pkl")
-    best_cloud = label_map[best_cloud_index]
-    with open("best_cloud.txt", "w") as f:
-        f.write(best_cloud)
-    print(f"✅ Predicted best cloud: {best_cloud}")
+# Train and evaluate
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    acc = accuracy_score(y_test, preds)
+    print(f"{name} accuracy: {acc:.4f}")
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python train_model.py <path_to_csv>")
-        sys.exit(1)
+    if acc > best_acc:
+        best_acc = acc
+        best_model = model
+        best_model_name = name
 
-    csv_file = sys.argv[1]
-    df = load_data(csv_file)
+# Save best model
+joblib.dump(best_model, best_model_file)
+print(f"Best model: {best_model_name} (Accuracy: {best_acc:.4f})")
 
-    X = df[['start_time', 'end_time', 'duration_seconds']]
-    y = df['cloud']
-    label_map = dict(enumerate(df['cloud'].astype('category').cat.categories))
+# Predict best cloud from most recent deployment
+latest = df.sort_values(by='end_time', ascending=False).iloc[0]
+predicted_class = best_model.predict([[latest['duration_seconds']]])[0]
+best_cloud = le.inverse_transform([predicted_class])[0]
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Save the best cloud
+with open("best_cloud.txt", "w") as f:
+    f.write(best_cloud)
 
-    best_model = train_and_select_best(X_train, y_train, X_test, y_test)
-
-    # Predict using best model on mean duration (simulated test point)
-    avg_features = pd.DataFrame([X.mean()])
-    predicted_index = best_model.predict(avg_features)[0]
-
-    save_outputs(best_model, predicted_index, label_map)
-
-if __name__ == '__main__':
-    main()
+print(f"Best cloud selected: {best_cloud}")
