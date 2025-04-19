@@ -208,6 +208,10 @@ jobs:
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
           install_components: gke-gcloud-auth-plugin
+<<<<<<< HEAD
+=======
+          
+>>>>>>> d580134 (Final Multi - Cloud Deployment with Log Collection)
 
       - name: Download logs
         run: |
@@ -219,3 +223,7 @@ jobs:
             --pattern deploy-log-azure-*.csv \
             --account-key ${{ secrets.AZURE_STORAGE_KEY }} || echo "⚠️ No Azure logs"
           aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "⚠️ No AWS logs"
+<<<<<<< HEAD
+=======
+
+>>>>>>> d580134 (Final Multi - Cloud Deployment with Log Collection)
