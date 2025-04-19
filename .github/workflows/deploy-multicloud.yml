@@ -201,3 +201,5 @@ jobs:
           END=$(date -u +%s)
           echo "AWS,$START,$END,$((END-START)),success" > log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-${{ github.run_id }}.csv
+
+          
