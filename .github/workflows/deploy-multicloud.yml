@@ -94,7 +94,63 @@ jobs:
   deploy-initial:
     needs: [build-and-push, check-logs-exist]
     if: needs.check-logs-exist.outputs.logs_exist == 'false'
-    uses: ./.github/workflows/deploy-initial.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Deploy to GCP
+      - uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+      - uses: google-github-actions/setup-gcloud@v1
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - run: gcloud container clusters get-credentials nci-research-cluster --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
+      - run: |
+          START=$(date -u +%s)
+          kubectl apply -f k8s/gcp/
+          kubectl set image deployment/django-app django-container=europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          kubectl rollout status deployment django-app
+          END=$(date -u +%s)
+          echo "cloud,start_time,end_time,duration_seconds,status" > log.csv
+          echo "GCP,$START,$END,$((END-START)),success" >> log.csv
+          gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-${{ github.run_id }}.csv
+
+      # Deploy to Azure
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_KEY }}
+      - uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
+      - run: |
+          START=$(date -u +%s)
+          kubectl apply -f k8s/azure/
+          kubectl set image deployment/django-app django-container=${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          kubectl rollout status deployment django-app
+          END=$(date -u +%s)
+          echo "Azure,$START,$END,$((END-START)),success" >> log.csv
+          az storage blob upload --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
+            --container-name ${{ env.AZURE_LOG_CONTAINER }} \
+            --name deploy-log-azure-${{ github.run_id }}.csv \
+            --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
+
+      # Deploy to AWS
+      - uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+      - run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
+      - run: |
+          START=$(date -u +%s)
+          kubectl apply -f k8s/aws/
+          kubectl set image deployment/django-app django-container=${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
+          kubectl rollout status deployment django-app
+          END=$(date -u +%s)
+          echo "AWS,$START,$END,$((END-START)),success" >> log.csv
+          aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-${{ github.run_id }}.csv
 
   collect-logs:
     needs: build-and-push
