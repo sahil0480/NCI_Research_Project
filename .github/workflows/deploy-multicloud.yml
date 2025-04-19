@@ -221,9 +221,7 @@ jobs:
       - uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
-
-      - name: Set Azure Context
-        uses: azure/aks-set-context@v3
+      - uses: azure/aks-set-context@v3
         with:
           resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
           cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
@@ -260,4 +258,4 @@ jobs:
           echo "AWS,$START,$END,$((END-START)),success" > log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-${{ github.run_id }}.csv
 
-        
+          
