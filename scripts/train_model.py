@@ -9,29 +9,31 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from xgboost import XGBClassifier
 
-# Load CSV file
+# Validate input
 if len(sys.argv) != 2:
     print("Usage: python train_model.py merged_logs.csv")
     sys.exit(1)
 
-df = pd.read_csv(sys.argv[1])
+# Read CSV safely
+csv_path = sys.argv[1]
+df = pd.read_csv(csv_path, on_bad_lines='skip')
 
-# Preprocess
+# Filter and clean data
 df = df.dropna()
-df = df[df['status'] == 'success']  # Filter only successful deploys
+df = df[df['status'] == 'success']  # Use only successful deploys
 
-# Encode cloud as label
+# Encode cloud provider as integer
 le = LabelEncoder()
 df['cloud_encoded'] = le.fit_transform(df['cloud'])  # GCP, Azure, AWS -> 0,1,2
 
-# Features and target
+# Define features and target
 X = df[['duration_seconds']]
 y = df['cloud_encoded']
 
-# Train/test split
+# Train-test split
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Models
+# Model candidates
 models = {
     'LogisticRegression': LogisticRegression(),
     'RandomForest': RandomForestClassifier(),
@@ -39,12 +41,11 @@ models = {
     'KNN': KNeighborsClassifier()
 }
 
+# Training loop
 best_model = None
 best_acc = 0
 best_model_name = ""
-best_model_file = "model.pkl"
 
-# Train and evaluate
 for name, model in models.items():
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
@@ -57,16 +58,16 @@ for name, model in models.items():
         best_model_name = name
 
 # Save best model
-joblib.dump(best_model, best_model_file)
-print(f"Best model: {best_model_name} (Accuracy: {best_acc:.4f})")
+joblib.dump(best_model, "model.pkl")
+print(f"✅ Best model: {best_model_name} (Accuracy: {best_acc:.4f})")
 
 # Predict best cloud from most recent deployment
 latest = df.sort_values(by='end_time', ascending=False).iloc[0]
 predicted_class = best_model.predict([[latest['duration_seconds']]])[0]
 best_cloud = le.inverse_transform([predicted_class])[0]
 
-# Save the best cloud
+# Save to file
 with open("best_cloud.txt", "w") as f:
     f.write(best_cloud)
 
-print(f"Best cloud selected: {best_cloud}")
+print(f"🚀 Best cloud selected: {best_cloud}")

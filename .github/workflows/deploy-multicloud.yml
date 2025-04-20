@@ -19,7 +19,6 @@ env:
   USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
 
 jobs:
-# ------------------------- BUILD AND PUSH IMAGES -------------------------
 
   build-and-push:
     runs-on: ubuntu-latest
@@ -32,19 +31,16 @@ jobs:
         run: echo "tag=commit-${{ github.sha }}" >> $GITHUB_OUTPUT
       - uses: docker/setup-buildx-action@v3
 
-      # Auth GCP
       - uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
       - run: gcloud auth configure-docker europe-west1-docker.pkg.dev
 
-      # Auth Azure
       - uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
       - run: az acr login --name ${{ env.AZURE_ACR_NAME }}
 
-      # Auth AWS
       - name: Parse AWS Credentials
         run: |
           echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_ENV
@@ -59,7 +55,6 @@ jobs:
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
           docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
 
-      # Build and Push Images
       - run: |
           docker build -t europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
                        -t ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }} \
@@ -67,8 +62,6 @@ jobs:
           docker push europe-west1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/django-repo/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
           docker push ${{ env.AZURE_ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
           docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
-
-# ------------------------- CHECK IF LOGS EXIST -------------------------
 
   check-logs-exist:
     needs: build-and-push
@@ -79,21 +72,28 @@ jobs:
       - uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
-      - name: Check Logs
+      - name: Parse AWS credentials
+        run: |
+          echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_ENV
+          echo "AWS_ACCOUNT_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccountId)" >> $GITHUB_ENV
+      - uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+      - name: Check for existing logs
         id: check
         run: |
           count=0
           gsutil ls gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-* && count=$((count+1)) || true
-          az storage blob list --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
-            --container-name ${{ env.AZURE_LOG_CONTAINER }} --account-key ${{ secrets.AZURE_STORAGE_KEY }} | grep -q deploy-log-azure- && count=$((count+1)) || true
+          az storage blob list --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} --container-name ${{ env.AZURE_LOG_CONTAINER }} --account-key ${{ secrets.AZURE_STORAGE_KEY }} | grep -q deploy-log-azure- && count=$((count+1)) || true
           aws s3 ls s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-* && count=$((count+1)) || true
           if [ "$count" -eq 0 ]; then
             echo "logs_exist=false" >> $GITHUB_OUTPUT
           else
             echo "logs_exist=true" >> $GITHUB_OUTPUT
           fi
-
-# ------------------------- INITIAL DEPLOYMENT IF LOGS DO NOT EXIST -------------------------
 
   deploy-initial:
     needs: [build-and-push, check-logs-exist]
@@ -102,14 +102,26 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # GCP
       - uses: google-github-actions/auth@v1
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
       - uses: google-github-actions/setup-gcloud@v1
         with:
           install_components: gke-gcloud-auth-plugin
-      - run: gcloud container clusters get-credentials nci-research-cluster --region ${{ env.GCP_REGION }} --project ${{ env.GCP_PROJECT_ID }}
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_KEY }}
+      - uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
+      - uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+      - run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
+
       - run: |
           START=$(date -u +%s)
           kubectl apply -f k8s/gcp/
@@ -119,14 +131,6 @@ jobs:
           echo "GCP,$START,$END,$((END-START)),success" > log.csv
           gsutil cp log.csv gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-${{ github.run_id }}.csv
 
-      # Azure
-      - uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_KEY }}
-      - uses: azure/aks-set-context@v3
-        with:
-          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
-          cluster-name: ${{ env.AZURE_AKS_CLUSTER }}
       - run: |
           START=$(date -u +%s)
           kubectl apply -f k8s/azure/
@@ -139,13 +143,6 @@ jobs:
             --name deploy-log-azure-${{ github.run_id }}.csv \
             --file log.csv --auth-mode key --account-key ${{ secrets.AZURE_STORAGE_KEY }}
 
-      # AWS
-      - uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-region: ${{ env.AWS_REGION }}
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-      - run: aws eks update-kubeconfig --name nci-research-eks --region ${{ env.AWS_REGION }}
       - run: |
           START=$(date -u +%s)
           kubectl apply -f k8s/aws/
@@ -154,8 +151,6 @@ jobs:
           END=$(date -u +%s)
           echo "AWS,$START,$END,$((END-START)),success" > log.csv
           aws s3 cp log.csv s3://${{ env.AWS_LOG_BUCKET }}/deploy-log-aws-${{ github.run_id }}.csv
-
-# ------------------------- COLLECT, MERGE AND UPLOAD LOGS TO GCS -------------------------
 
   collect-logs:
     needs: build-and-push
@@ -198,12 +193,10 @@ jobs:
             --pattern deploy-log-azure-*.csv \
             --account-key ${{ secrets.AZURE_STORAGE_KEY }} || echo "No Azure logs"
           aws s3 cp s3://${{ env.AWS_LOG_BUCKET }}/ logs/ --recursive --exclude "*" --include "deploy-log-aws-*.csv" || echo "No AWS logs"
-          echo "cloud,start_time,end_time,duration_seconds,status" > logs/merged_logs.csv
-          cat logs/*.csv | grep -v cloud >> logs/merged_logs.csv
-          [[ $(wc -l < logs/merged_logs.csv) -le 1 ]] && echo "No logs found" && exit 1
-          gsutil cp logs/merged_logs.csv gs://${{ env.GCP_LOG_BUCKET }}/merged_logs.csv
-
-# ------------------------- AI MODEL TO DECIDE BEST CLOUD -------------------------
+          echo "cloud,start_time,end_time,duration_seconds,status" > merged_logs.csv
+          cat logs/*.csv | grep -v cloud >> merged_logs.csv
+          [[ $(wc -l < merged_logs.csv) -le 1 ]] && echo "No logs found" && exit 1
+          gsutil cp merged_logs.csv gs://${{ env.GCP_LOG_BUCKET }}/merged_logs.csv
 
   AI-Model:
     needs: collect-logs
@@ -218,17 +211,15 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v1
         with:
           install_components: gsutil
-      - run: gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/merged_logs.csv merged_logs.csv
       - run: |
-          pip install pandas scikit-learn xgboost joblib
-          python scripts/train_model.py merged_logs.csv
+          gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/merged_logs.csv .
+      - run: pip install pandas scikit-learn xgboost joblib
+      - run: python scripts/train_model.py merged_logs.csv
       - id: read
         run: |
           BEST=$(cat best_cloud.txt)
           echo "best_cloud=$BEST" >> $GITHUB_OUTPUT
           echo "BEST_CLOUD=$BEST" >> $GITHUB_ENV
-
-# ------------------------- FINAL DEPLOYMENT BASED ON AI -------------------------
 
   deploy-gcp:
     needs: [build-and-push, AI-Model]
