@@ -221,6 +221,7 @@ jobs:
 
   AI-Model:
     needs: collect-logs
+    if: needs.collect-logs.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       best_cloud: ${{ steps.read.outputs.best_cloud }}
