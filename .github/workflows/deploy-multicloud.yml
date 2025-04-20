@@ -193,6 +193,13 @@ jobs:
       - uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_KEY }}
+
+      - name: Parse AWS Credentials
+        run: |
+          echo "AWS_ACCESS_KEY_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccessKeyId)" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo '${{ secrets.AWS_KEY }}' | jq -r .SecretAccessKey)" >> $GITHUB_ENV
+          echo "AWS_ACCOUNT_ID=$(echo '${{ secrets.AWS_KEY }}' | jq -r .AccountId)" >> $GITHUB_ENV
+          
       - uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-region: ${{ env.AWS_REGION }}
