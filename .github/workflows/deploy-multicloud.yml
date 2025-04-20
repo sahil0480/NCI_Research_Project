@@ -209,7 +209,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: merged_logs
-          path: merged_logs.csv
+          path: logs/merged_logs.csv
 
   AI-Model:
     needs: collect-logs
