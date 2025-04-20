@@ -191,7 +191,7 @@ jobs:
       # Download logs
       - run: |
           mkdir -p logs
-          gsutil cp gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv logs/ || echo "No GCP logs"
+          gsutil cp "gs://${{ env.GCP_LOG_BUCKET }}/deploy-log-gcp-*.csv" logs/ || echo "No GCP logs"
           az storage blob download-batch --account-name ${{ env.AZURE_STORAGE_ACCOUNT }} \
             --destination logs --source ${{ env.AZURE_LOG_CONTAINER }} \
             --pattern deploy-log-azure-*.csv \
