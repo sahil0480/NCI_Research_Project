@@ -206,7 +206,7 @@ jobs:
           [[ $(wc -l < merged_logs.csv) -le 1 ]] && echo "No logs found" && exit 1
 
       - name: Upload merged logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v3@v3.1.2
         with:
           name: merged_logs
           path: logs/merged_logs.csv
@@ -218,7 +218,7 @@ jobs:
       best_cloud: ${{ steps.read.outputs.best_cloud }}
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v3@v3.1.2
         with:
           name: merged_logs
           path: .
