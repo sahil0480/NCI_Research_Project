@@ -29,11 +29,6 @@ tensorflow==2.16.1
 joblib==1.2.0
 matplotlib==3.6.3
 
-# Security & Threat Detection
-python-dateutil==2.8.1  # Locked for falco compatibility
-requests==2.31.0
-PyYAML==6.0.1
-
 # System Utilities
 colorama==0.4.3
 pathspec==0.10.1
