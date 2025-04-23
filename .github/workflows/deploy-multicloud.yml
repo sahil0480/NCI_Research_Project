@@ -59,12 +59,12 @@ jobs:
     needs: collect-logs
     runs-on: ubuntu-latest
     outputs:
-      best_cloud: GCP
+      best_cloud: Azure
     steps:
       - name: Simulate Model Training
         run: |
           echo "Training AI models (simulated)..."
-          echo "best_cloud=GCP" >> $GITHUB_OUTPUT
+          echo "best_cloud=Azure" >> $GITHUB_OUTPUT
 
   deploy-gcp:
     needs: [build-and-push, AI-Model]
